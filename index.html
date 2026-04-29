@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Anime Streaming</title>
+
+    <style>
+      body {
+        background: #111;
+        color: white;
+        font-family: Arial;
+        text-align: center;
+      }
+
+      .container {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+
+      .card {
+        background: #1c1c1c;
+        margin: 15px;
+        padding: 10px;
+        border-radius: 10px;
+        width: 200px;
+      }
+
+      img {
+        width: 100%;
+        border-radius: 8px;
+      }
+
+      button {
+        margin: 10px;
+        padding: 8px 15px;
+        border-radius: 5px;
+        border: none;
+        background: rgb(147, 51, 234);
+        color: white;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        background: gray;
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h1>Anime Ongoing</h1>
+    <div class="container" id="animeList"></div>
+    <div>
+      <button id="sebelum">Sebelum</button>
+      <button id="next">Next</button>
+    </div>
+
+    <script>
+      let page = 1;
+      const limit = 5; // anime per halaman
+
+      const container = document.getElementById("animeList");
+      const btnNext = document.getElementById("next");
+      const btnSebelum = document.getElementById("sebelum");
+
+      async function loadAnime() {
+        const res = await fetch(`http://localhost:3001/otakudesu/ongoing?page=${page}`);
+        const data = await res.json();
+
+        const list = data.data.animeList;
+
+        container.innerHTML = "";
+
+        // Ambil 5 anime per page
+        list.slice(0, limit).forEach((anime) => {
+          const div = document.createElement("div");
+          div.className = "card";
+
+          div.innerHTML = `
+            <img src="${anime.poster}">
+            <h3>${anime.title}</h3>
+            <p>Episode: ${anime.episodes}</p>
+          `;
+          container.appendChild(div);
+        });
+
+        // Disable tombol jika di page pertama
+        btnSebelum.disabled = page === 1;
+        // Disable tombol jika tidak ada anime selanjutnya
+        btnNext.disabled = list.length < limit;
+      }
+
+      // Tombol Next
+      btnNext.onclick = () => {
+        page++;
+        loadAnime();
+      };
+
+      // Tombol Sebelum
+      btnSebelum.onclick = () => {
+        if (page > 1) {
+          page--;
+          loadAnime();
+        }
+      };
+
+      loadAnime();
+    </script>
+  </body>
+</html>
