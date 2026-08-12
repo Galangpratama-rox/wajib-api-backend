@@ -157,24 +157,40 @@ const kuramanimeParser = {
     let lastEpisodeByIndex: number | null = null;
 
     const episodeElems = episodeListEl.querySelectorAll("a");
+    const episodeList: T.ITextEpisodeCard[] = [];
 
     episodeElems.forEach((episodeEl, index) => {
       const text = Text(episodeEl);
       const match = text.match(/\b(\d+)\b/);
       const episode = match ? Number(match[1]) : null;
+      const rawId = Id(episodeEl);
+      const isValidEpisode = /^\d+$/.test(rawId);
 
       if (text.includes("Terlama")) {
         firstEpisode = episode;
       } else if (text.includes("Terbaru")) {
         lastEpisode = episode;
-      } else {
-        if (index === 0) {
+      } else if (isValidEpisode) {
+        if (firstEpisodeByIndex === null) {
           firstEpisodeByIndex = episode;
-        } else if (index === episodeElems.length - 1) {
-          lastEpisodeByIndex = episode;
         }
+        lastEpisodeByIndex = episode;
+
+        episodeList.push({
+          title: text,
+          episodeId: rawId,
+          animeId,
+          animeSlug,
+          kuramanimeUrl: AnimeSrc(episodeEl),
+        });
       }
     });
+
+    // Cek apakah ada next page di episode list
+    const episodeNextPageEl = episodeListEl.querySelector("a[href*='page=']");
+    const episodeNextPage = episodeNextPageEl
+      ? episodeNextPageEl.getAttribute("href")?.match(/page=(\d+)/)?.[1]
+      : null;
 
     const infoElems = document.querySelectorAll(".anime__details__widget ul li .col-9");
     const getInfo = kuramanimeExtraParser.parseInfo(infoElems);
@@ -214,6 +230,8 @@ const kuramanimeParser = {
         first: firstEpisode || firstEpisodeByIndex,
         last: lastEpisode || lastEpisodeByIndex || firstEpisodeByIndex,
       },
+      episodeList,
+      episodeNextPage: episodeNextPage ? Number(episodeNextPage) : null,
       episodes: getInfo(1),
       aired: getInfo(3).replace(/\s+/g, " ").trim(),
       duration: getInfo(5),
@@ -282,81 +300,42 @@ const kuramanimeParser = {
 
   parseEpisodeDetails(
     document: HTMLElement,
-    { animeId, animeSlug }: v.InferOutput<typeof kuramanimeSchema.param.episodeDetails>
+    { animeId, animeSlug }: v.InferOutput<typeof kuramanimeSchema.param.episodeDetails>,
+    browserResult?: import("@scrapers/kuramanime.scraper.js").IEpisodeBrowserResult
   ): T.IEpisodeDetails {
     const episodeTitleEl = document.querySelector(".breadcrumb__links #episodeTitle");
-    const prevEpisodeEl = document.querySelector(".episode__navigations a:first-child");
-    const nextEpisodeEl = document.querySelector(".episode__navigations a:last-child");
 
+    // Use prev/next from Puppeteer result if available (more reliable)
     let prevEpisode: T.ITextEpisodeCard | null = null;
     let nextEpisode: T.ITextEpisodeCard | null = null;
 
-    if (!prevEpisodeEl?.classList.contains("nav__disabled")) {
+    if (browserResult?.prevEpisodeHref) {
+      const href = browserResult.prevEpisodeHref;
+      const epId = href.split("/").pop() || "";
       prevEpisode = {
         title: "Prev episode",
-        episodeId: Id(prevEpisodeEl),
+        episodeId: epId,
         animeId,
         animeSlug,
-        kuramanimeUrl: AnimeSrc(prevEpisodeEl, baseUrl),
+        kuramanimeUrl: `${baseUrl}${href.startsWith("/") ? href.slice(1) : href}`,
       };
     }
 
-    if (!nextEpisodeEl?.classList.contains("nav__disabled")) {
+    if (browserResult?.nextEpisodeHref) {
+      const href = browserResult.nextEpisodeHref;
+      const epId = href.split("/").pop() || "";
       nextEpisode = {
         title: "Next episode",
-        episodeId: Id(nextEpisodeEl),
+        episodeId: epId,
         animeId,
         animeSlug,
-        kuramanimeUrl: AnimeSrc(nextEpisodeEl, baseUrl),
+        kuramanimeUrl: `${baseUrl}${href.startsWith("/") ? href.slice(1) : href}`,
       };
     }
 
-    const serverQualityElems = document.querySelectorAll("#player source");
-    const server: T.IEpisodeDetails["server"] = {
-      qualityList: serverQualityElems.map((serverQualityEl) => {
-        const title = Attr(serverQualityEl, "size");
-        const url = Attr(serverQualityEl, "src");
-
-        return {
-          title,
-          urlList: [
-            {
-              title: "kuramadrive",
-              url,
-            },
-          ],
-        };
-      }),
-    };
-
-    const downloadQualityElems = document.querySelectorAll("#animeDownloadLink h6");
-    const download: T.IBatchDetails["download"] = {
-      qualityList: downloadQualityElems.map((downloadQualityEl) => {
-        const title = Text(downloadQualityEl);
-        const urlList: IUrl[] = [];
-
-        let urlEl: HTMLElement | null | undefined = downloadQualityEl;
-
-        while (urlEl) {
-          if (urlEl.tagName === "A") {
-            urlList.push({
-              title: Text(urlEl),
-              url: Attr(urlEl, "href"),
-            });
-          } else if (urlEl.tagName === "BR") {
-            break;
-          }
-
-          urlEl = urlEl?.nextElementSibling;
-        }
-
-        return {
-          title: title.split("—")[0]?.trim() || "",
-          size: title.split("—")[1]?.trim().replace(/\(|\)/g, "") || "",
-          urlList,
-        };
-      }),
-    };
+    // Use server/download from Puppeteer result if available, else empty
+    const server: T.IEpisodeDetails["server"] = browserResult?.server ?? { qualityList: [] };
+    const download: T.IBatchDetails["download"] = browserResult?.download ?? { qualityList: [] };
 
     return {
       title: Text(episodeTitleEl?.previousElementSibling),
@@ -377,6 +356,36 @@ const kuramanimeParser = {
       server,
       download,
     };
+  },
+
+  // Parse hanya episode list dari satu halaman (untuk parallel fetch)
+  parseEpisodeListFromPage(
+    document: HTMLElement,
+    { animeId, animeSlug }: { animeId: string; animeSlug: string }
+  ): T.ITextEpisodeCard[] {
+    const episodeListEl = parse(
+      Attr(document.querySelector("#episodeLists"), "data-content").trim()
+    );
+    const episodeElems = episodeListEl.querySelectorAll("a");
+    const episodeList: T.ITextEpisodeCard[] = [];
+
+    episodeElems.forEach((episodeEl) => {
+      const text = Text(episodeEl);
+      const rawId = Id(episodeEl);
+      const isValidEpisode = /^\d+$/.test(rawId);
+
+      if (!text.includes("Terlama") && !text.includes("Terbaru") && isValidEpisode) {
+        episodeList.push({
+          title: text,
+          episodeId: rawId,
+          animeId,
+          animeSlug,
+          kuramanimeUrl: AnimeSrc(episodeEl),
+        });
+      }
+    });
+
+    return episodeList;
   },
 
   parsePagination(document: HTMLElement): IPagination | undefined {

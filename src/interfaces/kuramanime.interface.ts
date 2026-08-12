@@ -89,6 +89,8 @@ export interface IAnimeDetails {
     first: number | null;
     last: number | null;
   };
+  episodeList: ITextEpisodeCard[];
+  episodeNextPage: number | null;
   type: ITextPropertyTypeCard;
   status: ITextPropertyTypeCard;
   season: ITextPropertyTypeCard;

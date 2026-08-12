@@ -1,36 +1,45 @@
-# Use the official Node.js 20 Alpine image as a parent image for building
+# ============================================================
+# Stage 1: Build
+# ============================================================
 FROM node:20-alpine AS builder
 
-# Set the working directory in the container
 WORKDIR /usr/src/app
 
-# Copy package.json and package-lock.json to the working directory
 COPY package*.json ./
+RUN PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true npm install
 
-# Install dependencies
-RUN npm install
-
-# Copy the rest of the application code
 COPY . .
-
-# Build the TypeScript project
 RUN npm run build
 
-# Use a smaller image for the runtime
+# ============================================================
+# Stage 2: Runtime
+# ============================================================
 FROM node:20-alpine
 
-# Set the working directory in the container
+# Install Chromium and required libs for Puppeteer
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    font-noto \
+    dbus \
+    udev
+
+# Chromium binary on Alpine is at /usr/bin/chromium-browser
+ENV CHROME_PATH=/usr/bin/chromium-browser
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV NODE_ENV=production
+
 WORKDIR /usr/src/app
 
-# Copy the built application from the builder stage
 COPY --from=builder /usr/src/app/dist ./dist
 COPY --from=builder /usr/src/app/package*.json ./
 
-# Install only production dependencies
-RUN npm install --only=production
+RUN npm install --omit=dev
 
-# Expose the port the app runs on
 EXPOSE 3001
 
-# Command to run the application
 CMD ["node", "dist/index.js"]

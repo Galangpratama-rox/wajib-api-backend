@@ -319,6 +319,28 @@ const kuramanimeController = {
       const pathname = `/anime/${params.animeId}/${params.animeSlug}`;
       const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
       const details = kuramanimeParser.parseAnimeDetails(document, params);
+
+      // Generate episode list lengkap dari first..last jika episodeId sequential
+      // Ini menghindari fetch tambahan karena kuramanime episodeId = nomor episode
+      if (
+        details.episode.first !== null &&
+        details.episode.last !== null &&
+        details.episode.last > details.episode.first
+      ) {
+        const first = details.episode.first;
+        const last = details.episode.last;
+        details.episodeList = Array.from({ length: last - first + 1 }, (_, i) => {
+          const epNum = first + i;
+          return {
+            title: `Ep ${epNum}`,
+            episodeId: String(epNum),
+            animeId: params.animeId,
+            animeSlug: params.animeSlug,
+            kuramanimeUrl: `${baseUrl}anime/${params.animeId}/${params.animeSlug}/episode/${epNum}`,
+          };
+        });
+      }
+
       const payload = setPayload(res, {
         data: { details },
       });
@@ -333,7 +355,7 @@ const kuramanimeController = {
     try {
       const params = v.parse(kuramanimeSchema.param.batchDetails, req.params);
       const mainPathname = `/anime/${params.animeId}/${params.animeSlug}/batch/${params.batchId}`;
-      const secret = await kuramanimeScraper.scrapeSecret(`${baseUrl}/${mainPathname}`);
+      const secret = await kuramanimeScraper.scrapeSecret(`${baseUrl}${mainPathname}`);
       const pathname = `${mainPathname}?Ub3BzhijicHXZdv=${secret}&C2XAPerzX1BM7V9=kuramadrive&page=1`;
       const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
       const details = kuramanimeParser.parseBatchDetails(document, params);
@@ -350,11 +372,21 @@ const kuramanimeController = {
   async getEpisodeDetails(req: Request, res: Response, next: NextFunction) {
     try {
       const params = v.parse(kuramanimeSchema.param.episodeDetails, req.params);
-      const mainPathname = `anime/${params.animeId}/${params.animeSlug}/episode/${params.episodeId}`;
-      const secret = await kuramanimeScraper.scrapeSecret(`${baseUrl}/${mainPathname}`);
+      const mainPathname = `/anime/${params.animeId}/${params.animeSlug}/episode/${params.episodeId}`;
+
+      // Fetch base episode page for metadata (title, lastUpdated)
+      const secret = await kuramanimeScraper.scrapeSecret(`${baseUrl}${mainPathname}`);
       const pathname = `${mainPathname}?Ub3BzhijicHXZdv=${secret}&C2XAPerzX1BM7V9=kuramadrive&page=1`;
       const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
-      const details = kuramanimeParser.parseEpisodeDetails(document, params);
+
+      // Use Puppeteer to get streaming sources + download links (requires JS execution)
+      const browserResult = await kuramanimeScraper.scrapeEpisodeWithBrowser(
+        params.animeId,
+        params.animeSlug,
+        params.episodeId
+      );
+
+      const details = kuramanimeParser.parseEpisodeDetails(document, params, browserResult);
       const payload = setPayload(res, {
         data: { details },
       });
