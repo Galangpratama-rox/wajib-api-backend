@@ -1,0 +1,12 @@
+import { Router } from "express";
+import { serverCache } from "../middlewares/cache.js";
+import komiknesiaController from "../controllers/komiknesia.controller.js";
+const komiknesiaRouter = Router();
+komiknesiaRouter.get("/", komiknesiaController.getRoot);
+komiknesiaRouter.get("/home", serverCache(10), komiknesiaController.getHome);
+komiknesiaRouter.get("/komik", serverCache(10), komiknesiaController.getKomiks);
+komiknesiaRouter.get("/genre", serverCache(10), komiknesiaController.getGenres);
+komiknesiaRouter.get("/genre/:genreId", serverCache(10), komiknesiaController.getKomiksByGenre);
+komiknesiaRouter.get("/komik/:komikSlug", serverCache(10), komiknesiaController.getKomikDetails);
+komiknesiaRouter.get("/chapter/:komikSlug/:chapterSlug", serverCache(10), komiknesiaController.getChapterDetails);
+export default komiknesiaRouter;

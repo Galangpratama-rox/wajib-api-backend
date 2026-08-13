@@ -5,6 +5,7 @@ import errorHandler from "./middlewares/errorHandler.js";
 import otakudesuRouter from "./routes/otakudesu.routes.js";
 import samehadakuRouter from "./routes/samehadaku.routes.js";
 import kuramanimeRouter from "./routes/kuramanime.routes.js";
+import komiknesiaRouter from "./routes/komiknesia.routes.js";
 import setPayload from "./helpers/setPayload.js";
 import cors from "cors";
 const { PORT } = appConfig;
@@ -35,6 +36,7 @@ app.get("/", (req, res) => {
 app.use("/otakudesu", otakudesuRouter);
 app.use("/kuramanime", kuramanimeRouter);
 app.use("/samehadaku", samehadakuRouter);
+app.use("/komiknesia", komiknesiaRouter);
 app.use(errorHandler);
 app.listen(PORT, () => {
     console.log(`server is running on http://localhost:${PORT}`);
