@@ -36,7 +36,8 @@ const BLOCKED_SLUG_KEYWORDS = [
 export function isBlockedContent(opts) {
     const { title = "", slug = "", url = "", genreList = [], explicit = "" } = opts;
     // Check explicit field (from anime details)
-    if (explicit && explicit.toLowerCase() !== "none" && explicit !== "") {
+    // Only block if value is clearly explicit (not empty, "none", or unknown "?")
+    if (explicit && explicit.toLowerCase() !== "none" && explicit !== "" && explicit !== "?") {
         return true;
     }
     // Check genre list
