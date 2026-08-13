@@ -7,6 +7,7 @@ import kuramanimeExtraParser from "./extra/kuramanime.extra.parser.js";
 import errorinCuy from "@helpers/errorinCuy.js";
 import kuramanimeSchema from "@schemas/kuramanime.schema.js";
 import kuramanimeConfig from "@configs/kuramanime.config.js";
+import { isBlockedContent, shouldBlock } from "@helpers/contentFilter.js";
 
 const { Text, Attr, Id, Num, Src, AnimeSrc } = mainParser;
 const { baseUrl } = kuramanimeConfig;
@@ -62,11 +63,9 @@ const kuramanimeParser = {
   parseAnimes(document: HTMLElement): T.IAnimeCard[] {
     const animeElems = document.querySelectorAll("#animeList .product__item");
 
-    const animeList: T.IAnimeCard[] = animeElems.map((animeEl) => {
-      const animeCard = kuramanimeExtraParser.parseAnimeCard(animeEl);
-
-      return animeCard;
-    });
+    const animeList: T.IAnimeCard[] = animeElems
+      .map((animeEl) => kuramanimeExtraParser.parseAnimeCard(animeEl))
+      .filter((a) => !shouldBlock(a.title, a.animeSlug, a.kuramanimeUrl));
 
     if (animeList.length === 0) {
       throw errorinCuy(404);
@@ -78,11 +77,9 @@ const kuramanimeParser = {
   parseScheduledAnimes(document: HTMLElement, throwOnEmpty = true): T.IScheduledAnimeCard[] {
     const animeElems = document.querySelectorAll("#animeList .product__item");
 
-    const animeList: T.IScheduledAnimeCard[] = animeElems.map((animeEl) => {
-      const animeCard = kuramanimeExtraParser.parseScheduledAnimeCard(animeEl);
-
-      return animeCard;
-    });
+    const animeList: T.IScheduledAnimeCard[] = animeElems
+      .map((animeEl) => kuramanimeExtraParser.parseScheduledAnimeCard(animeEl))
+      .filter((a) => !shouldBlock(a.title, a.animeSlug, a.kuramanimeUrl));
 
     if (animeList.length === 0 && throwOnEmpty) {
       throw errorinCuy(404);
@@ -94,11 +91,9 @@ const kuramanimeParser = {
   parseEpisodes(document: HTMLElement): T.IEpisodeCard[] {
     const episodeElems = document.querySelectorAll("#animeList .product__item");
 
-    const episodeList: T.IEpisodeCard[] = episodeElems.map((animeEl) => {
-      const episodeCard = kuramanimeExtraParser.parseEpisodeCard(animeEl);
-
-      return episodeCard;
-    });
+    const episodeList: T.IEpisodeCard[] = episodeElems
+      .map((animeEl) => kuramanimeExtraParser.parseEpisodeCard(animeEl))
+      .filter((a) => !shouldBlock(a.title, a.animeSlug, a.kuramanimeUrl));
 
     if (episodeList.length === 0) {
       throw errorinCuy(404);
@@ -219,6 +214,14 @@ const kuramanimeParser = {
       };
     });
 
+    const explicitValue = getInfo(10);
+    const genreListValue = getInfoProperties(9);
+
+    // Block hentai/explicit content at detail level
+    if (isBlockedContent({ explicit: explicitValue, genreList: genreListValue })) {
+      throw errorinCuy(403);
+    }
+
     return {
       title,
       alternativeTitle,
@@ -235,7 +238,7 @@ const kuramanimeParser = {
       episodes: getInfo(1),
       aired: getInfo(3).replace(/\s+/g, " ").trim(),
       duration: getInfo(5),
-      explicit: getInfo(10),
+      explicit: explicitValue,
       score: getInfo(14),
       fans: getInfo(15),
       rating: getInfo(16),
@@ -246,12 +249,12 @@ const kuramanimeParser = {
       quality: getInfoProperty(6),
       country: getInfoProperty(7),
       source: getInfoProperty(8),
-      genreList: getInfoProperties(9),
+      genreList: genreListValue,
       themeList: getInfoProperties(12),
       demographicList: getInfoProperties(11),
       studioList: getInfoProperties(13),
       batchList,
-      similarAnimeList,
+      similarAnimeList: similarAnimeList.filter((a) => !shouldBlock(a.title, a.animeSlug, a.kuramanimeUrl)),
     };
   },
 
