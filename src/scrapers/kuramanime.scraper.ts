@@ -22,6 +22,12 @@ export interface IEpisodeBrowserResult {
   nextEpisodeHref: string | null;
 }
 
+// ─── In-flight deduplication map ───────────────────────────────────────────
+// Kalau ada 5 request untuk episode yang sama masuk bersamaan,
+// hanya 1 yang benar-benar scrape — sisanya nunggu promise yang sama.
+// Map dihapus begitu promise selesai (resolve/reject).
+const inFlightEpisode = new Map<string, Promise<IEpisodeBrowserResult>>();
+
 // ─── Persistent browser instance (reuse across requests) ───────────────────
 let browserInstance: Browser | null = null;
 let browserLaunchPromise: Promise<Browser> | null = null;
@@ -108,7 +114,30 @@ const kuramanimeScraper = {
     episodeId: string
   ): Promise<IEpisodeBrowserResult> {
     const episodeUrl = `${baseUrl}anime/${animeId}/${animeSlug}/episode/${episodeId}`;
+    const dedupeKey = `${animeId}/${animeSlug}/${episodeId}`;
 
+    // ── In-flight deduplication ──────────────────────────────────────────
+    // Kalau request untuk episode yang sama sedang berjalan,
+    // return promise yang sama — tidak spawn scraping baru.
+    const existing = inFlightEpisode.get(dedupeKey);
+    if (existing) {
+      console.info(`[scrapeEpisode] dedup hit for ${dedupeKey} — waiting for in-flight request`);
+      return existing;
+    }
+
+    const promise = kuramanimeScraper._doScrapeEpisode(episodeUrl, animeId, animeSlug).finally(() => {
+      inFlightEpisode.delete(dedupeKey);
+    });
+
+    inFlightEpisode.set(dedupeKey, promise);
+    return promise;
+  },
+
+  async _doScrapeEpisode(
+    episodeUrl: string,
+    animeId: string,
+    animeSlug: string
+  ): Promise<IEpisodeBrowserResult> {
     // If proxy keys are available, use ScraperAPI render instead of Puppeteer
     // This avoids Puppeteer IP block issues on cloud deployments
     if (hasProxyKeys()) {
@@ -121,7 +150,9 @@ const kuramanimeScraper = {
 
       try {
         const html = await Promise.race([
-          fetchViaProxyRendered(episodeUrl),
+          // wait_for_selector: ScraperAPI tunggu sampai #player source muncul di DOM
+          // Ini lebih efisien dari fixed wait karena return begitu player siap
+          fetchViaProxyRendered(episodeUrl, "#player source"),
           new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error("ScraperAPI render timeout")), SCRAPER_TIMEOUT_MS)
           ),
@@ -142,7 +173,16 @@ const kuramanimeScraper = {
     }
 
     // Fallback: Puppeteer (works on local / non-blocked IPs)
-    return kuramanimeScraper._scrapeEpisodeWithPuppeteer(animeId, animeSlug, episodeId);
+    const [animeId2, animeSlug2, episodeId2] = episodeUrl
+      .replace(baseUrl, "")
+      .replace("anime/", "")
+      .replace("/episode/", "/")
+      .split("/");
+    return kuramanimeScraper._scrapeEpisodeWithPuppeteer(
+      animeId2 ?? animeId,
+      animeSlug2 ?? animeSlug,
+      episodeId2 ?? ""
+    );
   },
 
   _parseEpisodeFromHTML(html: string, animeId: string, animeSlug: string): IEpisodeBrowserResult {

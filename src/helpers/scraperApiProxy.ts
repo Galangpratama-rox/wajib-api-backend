@@ -86,12 +86,24 @@ export async function fetchViaProxy(targetUrl: string): Promise<string> {
  * Fetch a URL through ScraperAPI with JS rendering enabled.
  * Use this for pages that require JavaScript to load content (e.g. video player).
  * Counts as 5 API credits per request.
+ *
+ * @param waitSelector CSS selector to wait for before returning HTML (e.g. "#player source")
+ * @param waitMs Additional wait time in ms after selector is found (default 0)
  */
-export async function fetchViaProxyRendered(targetUrl: string): Promise<string> {
-  return _fetchViaProxy(targetUrl, true);
+export async function fetchViaProxyRendered(
+  targetUrl: string,
+  waitSelector?: string,
+  waitMs?: number
+): Promise<string> {
+  return _fetchViaProxy(targetUrl, true, waitSelector, waitMs);
 }
 
-async function _fetchViaProxy(targetUrl: string, render: boolean): Promise<string> {
+async function _fetchViaProxy(
+  targetUrl: string,
+  render: boolean,
+  waitSelector?: string,
+  waitMs?: number
+): Promise<string> {
   if (keyPool.length === 0) {
     throw new Error("ScraperAPI: no keys configured (set SCRAPER_API_KEYS env variable)");
   }
@@ -107,7 +119,16 @@ async function _fetchViaProxy(targetUrl: string, render: boolean): Promise<strin
 
     triedKeys.add(key);
 
-    const proxyUrl = `${SCRAPER_API_BASE}?api_key=${key}&url=${encodeURIComponent(targetUrl)}&render=${render}`;
+    // Build proxy URL with optional render params
+    let proxyUrl = `${SCRAPER_API_BASE}?api_key=${key}&url=${encodeURIComponent(targetUrl)}&render=${render}`;
+    if (render && waitSelector) {
+      // wait_for_selector: ScraperAPI waits until element is present before returning HTML
+      proxyUrl += `&wait_for_selector=${encodeURIComponent(waitSelector)}`;
+    }
+    if (render && waitMs) {
+      // wait: additional ms to wait after page load
+      proxyUrl += `&wait=${waitMs}`;
+    }
 
     try {
       const res = await fetch(proxyUrl);

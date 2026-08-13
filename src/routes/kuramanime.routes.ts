@@ -30,7 +30,7 @@ kuramanimeRouter.get(
 );
 kuramanimeRouter.get(
   "/episode/:animeId/:animeSlug/:episodeId",
-  serverCache(10),
+  serverCache(30),
   kuramanimeController.getEpisodeDetails
 );
 
