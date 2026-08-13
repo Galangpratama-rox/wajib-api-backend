@@ -300,28 +300,31 @@ const kuramanimeController = {
       const day = query?.day || "all";
 
       // Kuramanime tidak support ?scheduled_day=all secara native —
-      // hanya return hari default (Senin). Fetch semua hari secara paralel.
+      // fetch tiap hari secara sequential dengan delay kecil
+      // untuk menghindari rate limit dan memory spike di Railway
       if (day === "all") {
         const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+        const animeList: ReturnType<typeof kuramanimeParser.parseScheduledAnimes> = [];
 
-        const results = await Promise.all(
-          days.map(async (d) => {
+        for (const d of days) {
+          try {
             const pathname = `/schedule?scheduled_day=${d}&page=${page}`;
             const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
-            return kuramanimeParser.parseScheduledAnimes(document, false);
+            const dayList = kuramanimeParser.parseScheduledAnimes(document, false);
+            animeList.push(...dayList);
+          } catch (_) {
+            // skip hari yang gagal, lanjut ke berikutnya
+          }
+          // delay kecil antar request agar tidak trigger rate limit
+          await new Promise((r) => setTimeout(r, 300));
+        }
+
+        return res.json(
+          setPayload(res, {
+            data: { animeList },
+            pagination: undefined,
           })
         );
-
-        // Gabungkan semua hari, filter yang kosong (throw 404 diabaikan)
-        const animeList = results.flat();
-        const pagination = undefined; // pagination tidak relevan saat all days
-
-        const payload = setPayload(res, {
-          data: { animeList },
-          pagination,
-        });
-
-        return res.json(payload);
       }
 
       // Fetch hari tertentu
