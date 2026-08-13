@@ -146,17 +146,15 @@ const kuramanimeScraper = {
                 }
             });
             try {
-                await page.goto(episodeUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+                await page.goto(episodeUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
             }
             catch (_) {
                 // timeout OK, JS still executes
             }
-            // Wait for #player source to appear — much faster than fixed 12s timeout
-            // Falls back to 8s max if player never loads (reduced from 15s)
+            // Wait for #player source to appear
+            // 15s timeout — enough for Railway Chromium to load the player
             try {
-                await page.waitForFunction(
-                // Pass as string to avoid TypeScript DOM type errors
-                "document.querySelectorAll('#player source').length > 0", { timeout: 8000, polling: 200 });
+                await page.waitForFunction("document.querySelectorAll('#player source').length > 0", { timeout: 15000, polling: 300 });
             }
             catch (_) {
                 // Player did not load in time — return what we have
