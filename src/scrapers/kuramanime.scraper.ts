@@ -107,7 +107,21 @@ const kuramanimeScraper = {
     animeSlug: string,
     episodeId: string
   ): Promise<IEpisodeBrowserResult> {
-    // ScraperAPI render=true returns 500 for kuramanime — go straight to Puppeteer
+    const episodeUrl = `${baseUrl}anime/${animeId}/${animeSlug}/episode/${episodeId}`;
+
+    // If proxy keys are available, use ScraperAPI render instead of Puppeteer
+    // This avoids Puppeteer IP block issues on cloud deployments
+    if (hasProxyKeys()) {
+      try {
+        console.info(`[scrapeEpisode] using ScraperAPI rendered for ${episodeUrl}`);
+        const html = await fetchViaProxyRendered(episodeUrl);
+        return kuramanimeScraper._parseEpisodeFromHTML(html, animeId, animeSlug);
+      } catch (err) {
+        console.warn(`[scrapeEpisode] ScraperAPI render failed, falling back to Puppeteer:`, err);
+      }
+    }
+
+    // Fallback: Puppeteer (works on local / non-blocked IPs)
     return kuramanimeScraper._scrapeEpisodeWithPuppeteer(animeId, animeSlug, episodeId);
   },
 
@@ -197,10 +211,11 @@ const kuramanimeScraper = {
         // timeout OK, JS still executes
       }
 
-      // Wait for #player source to appear
-      // 15s timeout — enough for Railway Chromium to load the player
+      // Wait for #player source to appear — much faster than fixed 12s timeout
+      // Falls back to 15s max if player never loads
       try {
         await page.waitForFunction(
+          // Pass as string to avoid TypeScript DOM type errors
           "document.querySelectorAll('#player source').length > 0",
           { timeout: 15000, polling: 300 }
         );
