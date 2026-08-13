@@ -144,7 +144,8 @@ const kuramanimeScraper = {
       // Falls back to 15s max if player never loads
       try {
         await page.waitForFunction(
-          () => document.querySelectorAll("#player source").length > 0,
+          // Pass as string to avoid TypeScript DOM type errors
+          "document.querySelectorAll('#player source').length > 0",
           { timeout: 15000, polling: 300 }
         );
       } catch (_) {
