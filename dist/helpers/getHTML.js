@@ -20,6 +20,7 @@ export default async function getHTML(baseUrl, pathname, ref, sanitize = false) 
         console.warn(`[getHTML] ${response.status} on ${url.toString()} — retrying via ScraperAPI proxy`);
         try {
             html = await fetchViaProxy(url.toString());
+            console.info(`[getHTML] proxy success — length=${html?.length ?? 0}`);
         }
         catch (proxyErr) {
             console.error("[getHTML] ScraperAPI fallback failed:", proxyErr);
@@ -32,8 +33,10 @@ export default async function getHTML(baseUrl, pathname, ref, sanitize = false) 
     else {
         html = await response.text();
     }
-    if (!html || !html.trim())
+    if (!html || !html.trim()) {
+        console.error(`[getHTML] html empty after fetch/proxy for ${url.toString()}`);
         errorinCuy(404);
+    }
     if (sanitize) {
         return sanitizeHtml(html, {
             allowedTags: [

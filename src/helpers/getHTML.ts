@@ -34,6 +34,7 @@ export default async function getHTML(
     console.warn(`[getHTML] ${response.status} on ${url.toString()} — retrying via ScraperAPI proxy`);
     try {
       html = await fetchViaProxy(url.toString());
+      console.info(`[getHTML] proxy success — length=${html?.length ?? 0}`);
     } catch (proxyErr) {
       console.error("[getHTML] ScraperAPI fallback failed:", proxyErr);
       errorinCuy(403);
@@ -44,7 +45,10 @@ export default async function getHTML(
     html = await response.text();
   }
 
-  if (!html || !html.trim()) errorinCuy(404);
+  if (!html || !html.trim()) {
+    console.error(`[getHTML] html empty after fetch/proxy for ${url.toString()}`);
+    errorinCuy(404);
+  }
 
   if (sanitize) {
     return sanitizeHtml(html!, {
