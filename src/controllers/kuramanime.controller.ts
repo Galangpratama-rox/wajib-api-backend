@@ -347,7 +347,8 @@ const kuramanimeController = {
     try {
       const params = v.parse(kuramanimeSchema.param.animeDetails, req.params);
       const pathname = `/anime/${params.animeId}/${params.animeSlug}`;
-      const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
+      // Referer dari halaman daftar anime — lebih natural dari perspektif Cloudflare
+      const document = await kuramanimeScraper.scrapeDOM(pathname, `${baseUrl}anime`);
       const details = kuramanimeParser.parseAnimeDetails(document, params);
 
       // Generate episode list lengkap dari first..last jika episodeId sequential
