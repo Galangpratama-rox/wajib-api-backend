@@ -1,7 +1,7 @@
 import kuramanimeConfig from "@configs/kuramanime.config.js";
 import getHTML from "@helpers/getHTML.js";
 import { parse, type HTMLElement } from "node-html-parser";
-import puppeteer from "puppeteer-core";
+import puppeteer, { type Browser } from "puppeteer-core";
 
 const { baseUrl } = kuramanimeConfig;
 
@@ -20,6 +20,70 @@ export interface IEpisodeBrowserResult {
   prevEpisodeHref: string | null;
   nextEpisodeHref: string | null;
 }
+
+// ─── Persistent browser instance (reuse across requests) ───────────────────
+let browserInstance: Browser | null = null;
+let browserLaunchPromise: Promise<Browser> | null = null;
+
+async function getBrowser(): Promise<Browser> {
+  // If already have a live instance, return it
+  if (browserInstance && browserInstance.connected) {
+    return browserInstance;
+  }
+
+  // If launch is in progress, wait for it
+  if (browserLaunchPromise) {
+    return browserLaunchPromise;
+  }
+
+  browserLaunchPromise = puppeteer.launch({
+    executablePath: CHROME_PATH,
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--no-zygote",
+      "--single-process",
+      "--disable-extensions",
+      "--disable-background-networking",
+      "--disable-default-apps",
+      "--disable-sync",
+      "--disable-translate",
+      "--hide-scrollbars",
+      "--metrics-recording-only",
+      "--mute-audio",
+      "--safebrowsing-disable-auto-update",
+    ],
+  }).then((b) => {
+    browserInstance = b;
+    browserLaunchPromise = null;
+
+    // Reset instance if browser crashes
+    b.on("disconnected", () => {
+      browserInstance = null;
+    });
+
+    return b;
+  });
+
+  return browserLaunchPromise;
+}
+
+// Resource types to block — tidak perlu untuk mendapatkan player
+const BLOCKED_RESOURCES = new Set([
+  "image", "stylesheet", "font", "media",
+  "ping", "manifest", "other",
+]);
+
+// Domains to block — analytics, ads, chat widget
+const BLOCKED_DOMAINS = [
+  "googletagmanager.com", "google-analytics.com",
+  "googlesyndication.com", "kuramachat.com",
+  "telegram.org", "onesignal.com",
+  "aniview.com", "arc-cdn.net",
+];
 
 const kuramanimeScraper = {
   async scrapeDOM(pathname: string, ref?: string, sanitize: boolean = false): Promise<HTMLElement> {
@@ -44,46 +108,51 @@ const kuramanimeScraper = {
   ): Promise<IEpisodeBrowserResult> {
     const episodeUrl = `${baseUrl}anime/${animeId}/${animeSlug}/episode/${episodeId}`;
 
-    const browser = await puppeteer.launch({
-      executablePath: CHROME_PATH,
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--no-zygote",
-        "--single-process",
-        "--disable-extensions",
-        "--disable-background-networking",
-        "--disable-default-apps",
-        "--disable-sync",
-        "--disable-translate",
-        "--hide-scrollbars",
-        "--metrics-recording-only",
-        "--mute-audio",
-        "--safebrowsing-disable-auto-update",
-      ],
-    });
+    // Reuse persistent browser — no cold start after first request
+    const browser = await getBrowser();
+    const page = await browser.newPage();
 
     try {
-      const page = await browser.newPage();
       await page.setUserAgent(
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
       );
 
+      // Block unnecessary resources to speed up page load
+      await page.setRequestInterception(true);
+      page.on("request", (req) => {
+        const type = req.resourceType();
+        const url = req.url();
+
+        const isBlocked =
+          BLOCKED_RESOURCES.has(type) ||
+          BLOCKED_DOMAINS.some((d) => url.includes(d));
+
+        if (isBlocked) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
+
       try {
         await page.goto(episodeUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
       } catch (_) {
-        // domcontentloaded timeout is OK, JS still runs
+        // timeout OK, JS still executes
       }
 
-      // Wait for player JS to execute
-      await new Promise((r) => setTimeout(r, 12000));
+      // Wait for #player source to appear — much faster than fixed 12s timeout
+      // Falls back to 15s max if player never loads
+      try {
+        await page.waitForFunction(
+          () => document.querySelectorAll("#player source").length > 0,
+          { timeout: 15000, polling: 300 }
+        );
+      } catch (_) {
+        // Player did not load in time — return what we have
+      }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result: IEpisodeBrowserResult = await (page.evaluate as any)((): IEpisodeBrowserResult => {
-        // Extract streaming sources
         const qualityList: { title: string; urlList: { title: string; url: string }[] }[] = [];
         // @ts-ignore - runs in browser context
         document.querySelectorAll("#player source").forEach((s: any) => {
@@ -94,7 +163,6 @@ const kuramanimeScraper = {
           }
         });
 
-        // Extract download links
         const downloadQualityList: { title: string; size: string; urlList: { title: string; url: string }[] }[] = [];
         let currentQuality: { title: string; size: string; urlList: { title: string; url: string }[] } | null = null;
 
@@ -117,7 +185,6 @@ const kuramanimeScraper = {
           }
         });
 
-        // Extract prev/next navigation
         // @ts-ignore - runs in browser context
         const prevEl: any = document.querySelector(".episode__navigations .before__nav");
         // @ts-ignore - runs in browser context
@@ -133,7 +200,8 @@ const kuramanimeScraper = {
 
       return result;
     } finally {
-      await browser.close();
+      // Close page only, keep browser alive for next request
+      await page.close();
     }
   },
 };
