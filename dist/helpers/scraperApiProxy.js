@@ -58,11 +58,21 @@ function markKeyExhausted(key) {
 }
 // ─── Public fetch via ScraperAPI ─────────────────────────────────────────────
 /**
- * Fetch a URL through ScraperAPI.
+ * Fetch a URL through ScraperAPI (static HTML, no JS rendering).
  * Automatically rotates keys on 401/403/429.
- * Throws if all keys are exhausted or no keys are configured.
  */
 export async function fetchViaProxy(targetUrl) {
+    return _fetchViaProxy(targetUrl, false);
+}
+/**
+ * Fetch a URL through ScraperAPI with JS rendering enabled.
+ * Use this for pages that require JavaScript to load content (e.g. video player).
+ * Counts as 5 API credits per request.
+ */
+export async function fetchViaProxyRendered(targetUrl) {
+    return _fetchViaProxy(targetUrl, true);
+}
+async function _fetchViaProxy(targetUrl, render) {
     if (keyPool.length === 0) {
         throw new Error("ScraperAPI: no keys configured (set SCRAPER_API_KEYS env variable)");
     }
@@ -73,7 +83,7 @@ export async function fetchViaProxy(targetUrl) {
             throw new Error("ScraperAPI: all keys exhausted, cannot fetch " + targetUrl);
         }
         triedKeys.add(key);
-        const proxyUrl = `${SCRAPER_API_BASE}?api_key=${key}&url=${encodeURIComponent(targetUrl)}&render=false`;
+        const proxyUrl = `${SCRAPER_API_BASE}?api_key=${key}&url=${encodeURIComponent(targetUrl)}&render=${render}`;
         try {
             const res = await fetch(proxyUrl);
             // Key-level errors → rotate

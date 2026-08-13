@@ -1,5 +1,6 @@
 import kuramanimeConfig from "../configs/kuramanime.config.js";
 import getHTML from "../helpers/getHTML.js";
+import { fetchViaProxyRendered, hasProxyKeys } from "../helpers/scraperApiProxy.js";
 import { parse } from "node-html-parser";
 import puppeteer, {} from "puppeteer-core";
 const { baseUrl } = kuramanimeConfig;
@@ -78,6 +79,65 @@ const kuramanimeScraper = {
         return text;
     },
     async scrapeEpisodeWithBrowser(animeId, animeSlug, episodeId) {
+        const episodeUrl = `${baseUrl}anime/${animeId}/${animeSlug}/episode/${episodeId}`;
+        // If proxy keys are available, use ScraperAPI render instead of Puppeteer
+        // This avoids Puppeteer IP block issues on cloud deployments
+        if (hasProxyKeys()) {
+            try {
+                console.info(`[scrapeEpisode] using ScraperAPI rendered for ${episodeUrl}`);
+                const html = await fetchViaProxyRendered(episodeUrl);
+                return kuramanimeScraper._parseEpisodeFromHTML(html, animeId, animeSlug);
+            }
+            catch (err) {
+                console.warn(`[scrapeEpisode] ScraperAPI render failed, falling back to Puppeteer:`, err);
+            }
+        }
+        // Fallback: Puppeteer (works on local / non-blocked IPs)
+        return kuramanimeScraper._scrapeEpisodeWithPuppeteer(animeId, animeSlug, episodeId);
+    },
+    _parseEpisodeFromHTML(html, animeId, animeSlug) {
+        const doc = parse(html, { parseNoneClosedTags: true });
+        // Parse streaming quality from #player source elements
+        const qualityList = [];
+        doc.querySelectorAll("#player source").forEach((s) => {
+            const src = s.getAttribute("src") || "";
+            const size = s.getAttribute("size") || "";
+            if (src && size) {
+                qualityList.push({ title: size, urlList: [{ title: "kuramadrive", url: src }] });
+            }
+        });
+        // Parse download links from #animeDownloadLink
+        const downloadQualityList = [];
+        let currentQuality = null;
+        doc.querySelectorAll("#animeDownloadLink h6, #animeDownloadLink a").forEach((el) => {
+            if (el.tagName === "H6") {
+                const text = el.text?.trim() || "";
+                const parts = text.split("—");
+                currentQuality = {
+                    title: parts[0]?.trim() || "",
+                    size: parts[1]?.trim().replace(/[()]/g, "") || "",
+                    urlList: [],
+                };
+                downloadQualityList.push(currentQuality);
+            }
+            else if (el.tagName === "A" && currentQuality) {
+                currentQuality.urlList.push({
+                    title: el.text?.trim() || "",
+                    url: el.getAttribute("href") || "",
+                });
+            }
+        });
+        // Parse prev/next navigation
+        const prevEl = doc.querySelector(".episode__navigations .before__nav");
+        const nextEl = doc.querySelector(".episode__navigations .after__nav");
+        return {
+            server: { qualityList },
+            download: { qualityList: downloadQualityList },
+            prevEpisodeHref: prevEl?.getAttribute("href") || null,
+            nextEpisodeHref: nextEl?.getAttribute("href") || null,
+        };
+    },
+    async _scrapeEpisodeWithPuppeteer(animeId, animeSlug, episodeId) {
         const episodeUrl = `${baseUrl}anime/${animeId}/${animeSlug}/episode/${episodeId}`;
         // Reuse persistent browser — no cold start after first request
         const browser = await getBrowser();
