@@ -79,20 +79,7 @@ const kuramanimeScraper = {
         return text;
     },
     async scrapeEpisodeWithBrowser(animeId, animeSlug, episodeId) {
-        const episodeUrl = `${baseUrl}anime/${animeId}/${animeSlug}/episode/${episodeId}`;
-        // If proxy keys are available, use ScraperAPI render instead of Puppeteer
-        // This avoids Puppeteer IP block issues on cloud deployments
-        if (hasProxyKeys()) {
-            try {
-                console.info(`[scrapeEpisode] using ScraperAPI rendered for ${episodeUrl}`);
-                const html = await fetchViaProxyRendered(episodeUrl);
-                return kuramanimeScraper._parseEpisodeFromHTML(html, animeId, animeSlug);
-            }
-            catch (err) {
-                console.warn(`[scrapeEpisode] ScraperAPI render failed, falling back to Puppeteer:`, err);
-            }
-        }
-        // Fallback: Puppeteer (works on local / non-blocked IPs)
+        // ScraperAPI render=true returns 500 for kuramanime — go straight to Puppeteer
         return kuramanimeScraper._scrapeEpisodeWithPuppeteer(animeId, animeSlug, episodeId);
     },
     _parseEpisodeFromHTML(html, animeId, animeSlug) {
@@ -159,17 +146,17 @@ const kuramanimeScraper = {
                 }
             });
             try {
-                await page.goto(episodeUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+                await page.goto(episodeUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
             }
             catch (_) {
                 // timeout OK, JS still executes
             }
             // Wait for #player source to appear — much faster than fixed 12s timeout
-            // Falls back to 15s max if player never loads
+            // Falls back to 8s max if player never loads (reduced from 15s)
             try {
                 await page.waitForFunction(
                 // Pass as string to avoid TypeScript DOM type errors
-                "document.querySelectorAll('#player source').length > 0", { timeout: 15000, polling: 300 });
+                "document.querySelectorAll('#player source').length > 0", { timeout: 8000, polling: 200 });
             }
             catch (_) {
                 // Player did not load in time — return what we have
