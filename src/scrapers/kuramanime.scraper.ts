@@ -112,12 +112,32 @@ const kuramanimeScraper = {
     // If proxy keys are available, use ScraperAPI render instead of Puppeteer
     // This avoids Puppeteer IP block issues on cloud deployments
     if (hasProxyKeys()) {
+      const t0 = Date.now();
+      console.info(`[scrapeEpisode] ScraperAPI rendered start — ${episodeUrl}`);
+
+      // Batas waktu ScraperAPI render: 45 detik
+      // Kalau lewat, langsung throw agar tidak gantung terlalu lama
+      const SCRAPER_TIMEOUT_MS = 45_000;
+
       try {
-        console.info(`[scrapeEpisode] using ScraperAPI rendered for ${episodeUrl}`);
-        const html = await fetchViaProxyRendered(episodeUrl);
-        return kuramanimeScraper._parseEpisodeFromHTML(html, animeId, animeSlug);
+        const html = await Promise.race([
+          fetchViaProxyRendered(episodeUrl),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("ScraperAPI render timeout")), SCRAPER_TIMEOUT_MS)
+          ),
+        ]);
+
+        console.info(`[scrapeEpisode] ScraperAPI rendered done in ${Date.now() - t0}ms`);
+        const result = kuramanimeScraper._parseEpisodeFromHTML(html, animeId, animeSlug);
+
+        // Kalau result kosong (player tidak ter-render), log warning tapi tetap return
+        if (result.server.qualityList.length === 0) {
+          console.warn(`[scrapeEpisode] ScraperAPI rendered returned empty qualityList in ${Date.now() - t0}ms`);
+        }
+
+        return result;
       } catch (err) {
-        console.warn(`[scrapeEpisode] ScraperAPI render failed, falling back to Puppeteer:`, err);
+        console.warn(`[scrapeEpisode] ScraperAPI render failed after ${Date.now() - t0}ms, falling back to Puppeteer:`, err);
       }
     }
 

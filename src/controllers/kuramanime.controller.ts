@@ -411,17 +411,27 @@ const kuramanimeController = {
       const params = v.parse(kuramanimeSchema.param.episodeDetails, req.params);
       const mainPathname = `/anime/${params.animeId}/${params.animeSlug}/episode/${params.episodeId}`;
 
-      // Fetch base episode page for metadata (title, lastUpdated)
-      const secret = await kuramanimeScraper.scrapeSecret(`${baseUrl}${mainPathname}`);
+      const t0 = Date.now();
+
+      // Jalankan semua fetch secara paralel:
+      // 1. scrapeSecret — ambil token
+      // 2. scrapeEpisodeWithBrowser — ScraperAPI render / Puppeteer (paling lambat, mulai duluan)
+      const [secret, browserResult] = await Promise.all([
+        kuramanimeScraper.scrapeSecret(`${baseUrl}${mainPathname}`),
+        kuramanimeScraper.scrapeEpisodeWithBrowser(
+          params.animeId,
+          params.animeSlug,
+          params.episodeId
+        ),
+      ]);
+
+      console.info(`[getEpisodeDetails] parallel fetch done in ${Date.now() - t0}ms`);
+
+      // Setelah secret tersedia, fetch HTML statis untuk metadata (title, lastUpdated)
       const pathname = `${mainPathname}?Ub3BzhijicHXZdv=${secret}&C2XAPerzX1BM7V9=kuramadrive&page=1`;
       const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
 
-      // Use Puppeteer to get streaming sources + download links (requires JS execution)
-      const browserResult = await kuramanimeScraper.scrapeEpisodeWithBrowser(
-        params.animeId,
-        params.animeSlug,
-        params.episodeId
-      );
+      console.info(`[getEpisodeDetails] dom fetch done in ${Date.now() - t0}ms total`);
 
       const details = kuramanimeParser.parseEpisodeDetails(document, params, browserResult);
       const payload = setPayload(res, {
