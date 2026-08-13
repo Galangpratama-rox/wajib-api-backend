@@ -41,5 +41,6 @@ COPY --from=builder /usr/src/app/package*.json ./
 RUN npm install --omit=dev
 
 EXPOSE 3001
+EXPOSE 8080
 
 CMD ["node", "dist/index.js"]
