@@ -348,7 +348,14 @@ const kuramanimeController = {
       const params = v.parse(kuramanimeSchema.param.animeDetails, req.params);
       const pathname = `/anime/${params.animeId}/${params.animeSlug}`;
       const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
-      const details = kuramanimeParser.parseAnimeDetails(document, params);
+      
+      let details;
+      try {
+        details = kuramanimeParser.parseAnimeDetails(document, params);
+      } catch (parseErr: any) {
+        console.error(`[getAnimeDetails] parse error for ${pathname}:`, parseErr?.status, parseErr?.message, parseErr?.stack?.slice(0, 200));
+        throw parseErr;
+      }
 
       // Generate episode list lengkap dari first..last jika episodeId sequential
       // Ini menghindari fetch tambahan karena kuramanime episodeId = nomor episode
