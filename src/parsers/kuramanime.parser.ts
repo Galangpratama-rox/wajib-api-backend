@@ -75,7 +75,7 @@ const kuramanimeParser = {
     return animeList;
   },
 
-  parseScheduledAnimes(document: HTMLElement): T.IScheduledAnimeCard[] {
+  parseScheduledAnimes(document: HTMLElement, throwOnEmpty = true): T.IScheduledAnimeCard[] {
     const animeElems = document.querySelectorAll("#animeList .product__item");
 
     const animeList: T.IScheduledAnimeCard[] = animeElems.map((animeEl) => {
@@ -84,7 +84,7 @@ const kuramanimeParser = {
       return animeCard;
     });
 
-    if (animeList.length === 0) {
+    if (animeList.length === 0 && throwOnEmpty) {
       throw errorinCuy(404);
     }
 

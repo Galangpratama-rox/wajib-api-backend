@@ -298,6 +298,33 @@ const kuramanimeController = {
       const query = v.parse(kuramanimeSchema.query.scheduledAnimes, req.query);
       const page = Number(query?.page) || 1;
       const day = query?.day || "all";
+
+      // Kuramanime tidak support ?scheduled_day=all secara native —
+      // hanya return hari default (Senin). Fetch semua hari secara paralel.
+      if (day === "all") {
+        const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+
+        const results = await Promise.all(
+          days.map(async (d) => {
+            const pathname = `/schedule?scheduled_day=${d}&page=${page}`;
+            const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
+            return kuramanimeParser.parseScheduledAnimes(document, false);
+          })
+        );
+
+        // Gabungkan semua hari, filter yang kosong (throw 404 diabaikan)
+        const animeList = results.flat();
+        const pagination = undefined; // pagination tidak relevan saat all days
+
+        const payload = setPayload(res, {
+          data: { animeList },
+          pagination,
+        });
+
+        return res.json(payload);
+      }
+
+      // Fetch hari tertentu
       const pathname = `/schedule?scheduled_day=${day}&page=${page}`;
       const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
       const animeList = kuramanimeParser.parseScheduledAnimes(document);
