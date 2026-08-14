@@ -18,5 +18,7 @@ otakudesuRouter.get("/anime/:animeId", serverCache(10), otakudesuController.getA
 otakudesuRouter.get("/episode/:episodeId", serverCache(10), otakudesuController.getEpisodeDetails);
 otakudesuRouter.get("/server/:serverId", serverCache(10), otakudesuController.getServerDetails);
 otakudesuRouter.post("/server/:serverId", serverCache(10), otakudesuController.getServerDetails);
+otakudesuRouter.get("/video-stream", otakudesuController.videoStream);
+otakudesuRouter.options("/video-stream", otakudesuController.videoStream);
 
 export default otakudesuRouter;

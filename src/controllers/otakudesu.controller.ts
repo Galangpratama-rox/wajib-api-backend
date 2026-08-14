@@ -5,6 +5,8 @@ import otakudesuConfig from "@configs/otakudesu.config.js";
 import otakudesuSchema from "@schemas/otakudesu.schema.js";
 import setPayload from "@helpers/setPayload.js";
 import * as v from "valibot";
+import https from "https";
+import http from "http";
 
 const { baseUrl } = otakudesuConfig;
 
@@ -367,6 +369,150 @@ const otakudesuController = {
         return;
       }
 
+      next(error);
+    }
+  },
+
+  async videoStream(req: Request, res: Response, next: NextFunction) {
+    // Handle CORS preflight
+    if (req.method === "OPTIONS") {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Range");
+      res.setHeader("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges");
+      res.status(204).end();
+      return;
+    }
+
+    const rawUrl = req.query.url as string | undefined;
+
+    if (!rawUrl) {
+      res.status(400).json(setPayload(res, { message: "Query parameter 'url' is required." }));
+      return;
+    }
+
+    // Decode URL jika masih encoded
+    let targetUrl: string;
+    try {
+      targetUrl = decodeURIComponent(rawUrl);
+    } catch {
+      res.status(400).json(setPayload(res, { message: "Invalid URL encoding." }));
+      return;
+    }
+
+    // Validasi URL dan whitelist domain
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(targetUrl);
+    } catch {
+      res.status(400).json(setPayload(res, { message: "URL tidak valid." }));
+      return;
+    }
+
+    const allowedDomains = ["googlevideo.com", "archive.org", "blogger.com"];
+    const hostname = parsedUrl.hostname.toLowerCase();
+    const isAllowed = allowedDomains.some(
+      (domain) => hostname === domain || hostname.endsWith(`.${domain}`)
+    );
+
+    if (!isAllowed) {
+      res.status(403).json(
+        setPayload(res, {
+          message: `Domain tidak diizinkan. Hanya domain berikut yang diperbolehkan: ${allowedDomains.join(", ")}`,
+        })
+      );
+      return;
+    }
+
+    // Helper untuk melakukan fetch dengan follow redirect manual
+    const doFetch = (
+      url: string,
+      rangeHeader: string | undefined,
+      redirectCount = 0
+    ): Promise<void> => {
+      return new Promise((resolve, reject) => {
+        if (redirectCount > 5) {
+          reject(new Error("Terlalu banyak redirect."));
+          return;
+        }
+
+        const parsedTarget = new URL(url);
+        const lib = parsedTarget.protocol === "https:" ? https : http;
+
+        const reqHeaders: Record<string, string> = {
+          Referer: "https://otakudesu.blog/",
+          Origin: "https://otakudesu.blog",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        };
+
+        if (rangeHeader) {
+          reqHeaders["Range"] = rangeHeader;
+        }
+
+        const options = {
+          hostname: parsedTarget.hostname,
+          port: parsedTarget.port || (parsedTarget.protocol === "https:" ? 443 : 80),
+          path: parsedTarget.pathname + parsedTarget.search,
+          method: "GET",
+          headers: reqHeaders,
+        };
+
+        const upstreamReq = lib.request(options, (upstreamRes) => {
+          const statusCode = upstreamRes.statusCode ?? 500;
+
+          // Handle redirect manual
+          if (
+            (statusCode === 301 || statusCode === 302 || statusCode === 307 || statusCode === 308) &&
+            upstreamRes.headers.location
+          ) {
+            const redirectUrl = new URL(upstreamRes.headers.location, url).toString();
+            upstreamRes.resume(); // buang body redirect
+            resolve(doFetch(redirectUrl, rangeHeader, redirectCount + 1));
+            return;
+          }
+
+          // Set CORS headers
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          res.setHeader("Access-Control-Allow-Headers", "Range");
+          res.setHeader(
+            "Access-Control-Expose-Headers",
+            "Content-Range, Content-Length, Accept-Ranges"
+          );
+
+          // Forward headers yang diperlukan dari upstream
+          const forwardHeaders = [
+            "content-type",
+            "content-range",
+            "accept-ranges",
+            "content-length",
+          ];
+          for (const header of forwardHeaders) {
+            const value = upstreamRes.headers[header];
+            if (value) {
+              res.setHeader(header, value);
+            }
+          }
+
+          // Jangan forward header berikut
+          // content-security-policy, x-frame-options — tidak di-forward
+
+          res.status(statusCode);
+          upstreamRes.pipe(res);
+
+          upstreamRes.on("end", resolve);
+          upstreamRes.on("error", reject);
+        });
+
+        upstreamReq.on("error", reject);
+        upstreamReq.end();
+      });
+    };
+
+    try {
+      const rangeHeader = req.headers["range"] as string | undefined;
+      await doFetch(targetUrl, rangeHeader);
+    } catch (error) {
       next(error);
     }
   },
