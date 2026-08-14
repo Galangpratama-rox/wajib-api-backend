@@ -53,6 +53,9 @@ export default function errorHandler(
 
   // logErrorToFile(err, req, uuid);
 
+  // Log error detail ke console untuk debugging
+  console.error("[errorHandler] Unhandled error:", err?.message ?? err, err?.stack ?? "");
+
   res.status(500).json(
     setPayload(res, {
       // message: `Terjadi kesalahan tak terduga. Request ID: ${uuid}`,

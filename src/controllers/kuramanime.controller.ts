@@ -357,23 +357,24 @@ const kuramanimeController = {
         throw parseErr;
       }
 
-      // Generate episode list lengkap dari first..last jika episodeId sequential
-      // Ini menghindari fetch tambahan karena kuramanime episodeId = nomor episode
-      if (
-        details.episode.first !== null &&
-        details.episode.last !== null &&
-        details.episode.last > details.episode.first
-      ) {
-        const first = details.episode.first;
-        const last = details.episode.last;
-        details.episodeList = Array.from({ length: last - first + 1 }, (_, i) => {
-          const epNum = first + i;
+      // Generate episode list lengkap dari 1..last.
+      // "Terlama" di HTML bukan episode pertama anime — itu episode terlama
+      // di halaman pertama pagination episode list (e.g. One Piece: ep 989).
+      // Karena episodeId = nomor episode dan semua anime di Kuramanime mulai dari ep 1,
+      // kita selalu generate dari 1 sampai last.
+      const last = details.episode.last;
+
+      if (last !== null && last >= 1) {
+        details.episode.first = 1;
+        details.episodeList = Array.from({ length: last }, (_, i) => {
+          const epNum = i + 1;
           return {
             title: `Ep ${epNum}`,
             episodeId: String(epNum),
             animeId: params.animeId,
             animeSlug: params.animeSlug,
-            kuramanimeUrl: `${baseUrl}anime/${params.animeId}/${params.animeSlug}/episode/${epNum}`,
+            // kuramanimeUrl dikosongkan — client generate sendiri jika diperlukan
+            kuramanimeUrl: undefined,
           };
         });
       }

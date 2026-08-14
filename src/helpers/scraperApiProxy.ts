@@ -5,6 +5,10 @@
  * comma-separated list, e.g.:
  *   SCRAPER_API_KEYS=key1,key2,key3,...
  *
+ * Proxy mode dikendalikan oleh env var USE_PROXY:
+ *   USE_PROXY=true  → aktifkan ScraperAPI (untuk IP yang diblokir Kuramanime)
+ *   USE_PROXY=false → bypass ScraperAPI, direct fetch (default, IP Railway tidak diblok)
+ *
  * Rotation strategy:
  *   - Round-robin across all keys.
  *   - If a key returns 403/401/429, it is marked as exhausted and the next
@@ -15,6 +19,18 @@
 
 const SCRAPER_API_BASE = "http://api.scraperapi.com";
 const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
+// ─── Proxy mode toggle ───────────────────────────────────────────────────────
+// USE_PROXY=true  → pakai ScraperAPI (IP diblokir Kuramanime)
+// USE_PROXY=false → direct fetch, bypass ScraperAPI (default)
+// Dibaca sekali saat startup agar konsisten selama proses berjalan.
+const USE_PROXY = process.env.USE_PROXY?.toLowerCase() === "true";
+
+if (USE_PROXY) {
+  console.info("[scraperApiProxy] Proxy mode: ENABLED (USE_PROXY=true)");
+} else {
+  console.info("[scraperApiProxy] Proxy mode: DISABLED (USE_PROXY=false or not set) — direct fetch");
+}
 
 interface KeyState {
   key: string;
@@ -156,5 +172,5 @@ async function _fetchViaProxy(
 }
 
 export function hasProxyKeys(): boolean {
-  return keyPool.length > 0;
+  return USE_PROXY && keyPool.length > 0;
 }

@@ -140,4 +140,6 @@ export interface IBatchDetails {
 
 export interface IServerDetails {
   url: string;
+  videoUrl: string | null;
+  type: "odstream" | "ondesuhd" | "unknown";
 }

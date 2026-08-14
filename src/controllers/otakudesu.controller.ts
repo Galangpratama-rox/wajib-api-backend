@@ -147,7 +147,8 @@ const otakudesuController = {
       {
         method: "GET | POST",
         path: "/otakudesu/server/{serverId}",
-        description: "Link video berdasarkan id server",
+        description:
+          'Link video berdasarkan id server. Response berisi "url" (iframe desustream), "videoUrl" (direct mp4/video URL siap pakai di <video>), dan "type" (odstream | ondesuhd | unknown)',
         pathParams: [
           {
             key: "serverId",
