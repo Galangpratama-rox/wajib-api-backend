@@ -111,23 +111,24 @@ const kuramanimeParser = {
         let lastEpisodeByIndex = null;
         const episodeElems = episodeListEl.querySelectorAll("a");
         const episodeList = [];
-        episodeElems.forEach((episodeEl, index) => {
+        episodeElems.forEach((episodeEl) => {
             const text = Text(episodeEl);
-            const match = text.match(/\b(\d+)\b/);
-            const episode = match ? Number(match[1]) : null;
             const rawId = Id(episodeEl);
             const isValidEpisode = /^\d+$/.test(rawId);
+            const epNum = isValidEpisode ? Number(rawId) : null;
             if (text.includes("Terlama")) {
-                firstEpisode = episode;
+                // href langsung ke episodeId episode terlama (episode pertama anime)
+                firstEpisode = epNum;
             }
             else if (text.includes("Terbaru")) {
-                lastEpisode = episode;
+                // href langsung ke episodeId episode terbaru (episode terakhir anime)
+                lastEpisode = epNum;
             }
             else if (isValidEpisode) {
                 if (firstEpisodeByIndex === null) {
-                    firstEpisodeByIndex = episode;
+                    firstEpisodeByIndex = epNum;
                 }
-                lastEpisodeByIndex = episode;
+                lastEpisodeByIndex = epNum;
                 episodeList.push({
                     title: text,
                     episodeId: rawId,

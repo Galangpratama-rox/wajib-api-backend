@@ -24,6 +24,12 @@ import setPayload from "../helpers/setPayload.js";
 //   fs.appendFileSync(logFilePath, logMessage);
 // }
 export default function errorHandler(err, req, res, next) {
+    // PENTING: kalau response sudah terkirim (atau koneksi client sudah putus),
+    // jangan coba kirim response lagi — itu yang menyebabkan ERR_HTTP_HEADERS_SENT
+    // crash seluruh container. Delegasikan ke default Express error handler.
+    if (res.headersSent) {
+        return next(err);
+    }
     if (err instanceof ValiError) {
         res.status(400).json(setPayload(res, { message: err.issues[0]?.message }));
         return;
@@ -34,8 +40,18 @@ export default function errorHandler(err, req, res, next) {
     }
     // const uuid = uuidv4();
     // logErrorToFile(err, req, uuid);
-    res.status(500).json(setPayload(res, {
-        // message: `Terjadi kesalahan tak terduga. Request ID: ${uuid}`,
-        message: `Terjadi kesalahan tak terduga`,
-    }));
+    // Log error detail ke console untuk debugging
+    console.error("[errorHandler] Unhandled error:", err?.message ?? err, err?.stack ?? "");
+    // Bungkus dalam try/catch sebagai safety net terakhir —
+    // pastikan errorHandler sendiri tidak bisa throw dan crash proses.
+    try {
+        res.status(500).json(setPayload(res, {
+            // message: `Terjadi kesalahan tak terduga. Request ID: ${uuid}`,
+            message: `Terjadi kesalahan tak terduga`,
+        }));
+    }
+    catch (sendErr) {
+        // Tidak bisa mengirim response (koneksi sudah mati) — cukup log, jangan re-throw
+        console.error("[errorHandler] Failed to send error response:", sendErr);
+    }
 }

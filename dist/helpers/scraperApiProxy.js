@@ -5,6 +5,10 @@
  * comma-separated list, e.g.:
  *   SCRAPER_API_KEYS=key1,key2,key3,...
  *
+ * Proxy mode dikendalikan oleh env var USE_PROXY:
+ *   USE_PROXY=true  → aktifkan ScraperAPI (untuk IP yang diblokir Kuramanime)
+ *   USE_PROXY=false → bypass ScraperAPI, direct fetch (default, IP Railway tidak diblok)
+ *
  * Rotation strategy:
  *   - Round-robin across all keys.
  *   - If a key returns 403/401/429, it is marked as exhausted and the next
@@ -14,6 +18,17 @@
  */
 const SCRAPER_API_BASE = "http://api.scraperapi.com";
 const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+// ─── Proxy mode toggle ───────────────────────────────────────────────────────
+// USE_PROXY=true  → pakai ScraperAPI (IP diblokir Kuramanime)
+// USE_PROXY=false → direct fetch, bypass ScraperAPI (default)
+// Dibaca sekali saat startup agar konsisten selama proses berjalan.
+const USE_PROXY = process.env.USE_PROXY?.toLowerCase() === "true";
+if (USE_PROXY) {
+    console.info("[scraperApiProxy] Proxy mode: ENABLED (USE_PROXY=true)");
+}
+else {
+    console.info("[scraperApiProxy] Proxy mode: DISABLED (USE_PROXY=false or not set) — direct fetch");
+}
 // ─── Key pool ────────────────────────────────────────────────────────────────
 function loadKeys() {
     const raw = process.env.SCRAPER_API_KEYS ?? "";
@@ -57,6 +72,10 @@ function markKeyExhausted(key) {
     }
 }
 // ─── Public fetch via ScraperAPI ─────────────────────────────────────────────
+// Timeout per-request ke ScraperAPI. Rendered mode butuh waktu lebih lama
+// (JS execution), jadi pakai nilai berbeda tergantung mode.
+const PROXY_STATIC_TIMEOUT_MS = 30_000; // 30s untuk static HTML
+const PROXY_RENDER_TIMEOUT_MS = 60_000; // 60s untuk render JS
 /**
  * Fetch a URL through ScraperAPI (static HTML, no JS rendering).
  * Automatically rotates keys on 401/403/429.
@@ -68,24 +87,39 @@ export async function fetchViaProxy(targetUrl) {
  * Fetch a URL through ScraperAPI with JS rendering enabled.
  * Use this for pages that require JavaScript to load content (e.g. video player).
  * Counts as 5 API credits per request.
+ *
+ * @param waitSelector CSS selector to wait for before returning HTML (e.g. "#player source")
+ * @param waitMs Additional wait time in ms after selector is found (default 0)
  */
-export async function fetchViaProxyRendered(targetUrl) {
-    return _fetchViaProxy(targetUrl, true);
+export async function fetchViaProxyRendered(targetUrl, waitSelector, waitMs) {
+    return _fetchViaProxy(targetUrl, true, waitSelector, waitMs);
 }
-async function _fetchViaProxy(targetUrl, render) {
+async function _fetchViaProxy(targetUrl, render, waitSelector, waitMs) {
     if (keyPool.length === 0) {
         throw new Error("ScraperAPI: no keys configured (set SCRAPER_API_KEYS env variable)");
     }
     const triedKeys = new Set();
+    const timeoutMs = render ? PROXY_RENDER_TIMEOUT_MS : PROXY_STATIC_TIMEOUT_MS;
     while (true) {
         const key = getNextKey();
         if (!key || triedKeys.has(key)) {
             throw new Error("ScraperAPI: all keys exhausted, cannot fetch " + targetUrl);
         }
         triedKeys.add(key);
-        const proxyUrl = `${SCRAPER_API_BASE}?api_key=${key}&url=${encodeURIComponent(targetUrl)}&render=${render}`;
+        // Build proxy URL with optional render params
+        let proxyUrl = `${SCRAPER_API_BASE}?api_key=${key}&url=${encodeURIComponent(targetUrl)}&render=${render}`;
+        if (render && waitSelector) {
+            // wait_for_selector: ScraperAPI waits until element is present before returning HTML
+            proxyUrl += `&wait_for_selector=${encodeURIComponent(waitSelector)}`;
+        }
+        if (render && waitMs) {
+            // wait: additional ms to wait after page load
+            proxyUrl += `&wait=${waitMs}`;
+        }
         try {
-            const res = await fetch(proxyUrl);
+            const res = await fetch(proxyUrl, {
+                signal: AbortSignal.timeout(timeoutMs),
+            });
             // Key-level errors → rotate
             if (res.status === 401 || res.status === 403 || res.status === 429) {
                 markKeyExhausted(key);
@@ -97,15 +131,16 @@ async function _fetchViaProxy(targetUrl, render) {
             return res.text();
         }
         catch (err) {
-            // Network error on this key → try next
+            // Network / timeout error on this key → try next key
             if (err instanceof Error && err.message.includes("ScraperAPI: upstream")) {
                 throw err;
             }
+            console.warn(`[ScraperAPI] fetch error for key ...${key.slice(-6)}, rotating:`, err?.message ?? err);
             markKeyExhausted(key);
             continue;
         }
     }
 }
 export function hasProxyKeys() {
-    return keyPool.length > 0;
+    return USE_PROXY && keyPool.length > 0;
 }

@@ -90,6 +90,11 @@ function markKeyExhausted(key: string): void {
 
 // ─── Public fetch via ScraperAPI ─────────────────────────────────────────────
 
+// Timeout per-request ke ScraperAPI. Rendered mode butuh waktu lebih lama
+// (JS execution), jadi pakai nilai berbeda tergantung mode.
+const PROXY_STATIC_TIMEOUT_MS = 30_000;  // 30s untuk static HTML
+const PROXY_RENDER_TIMEOUT_MS = 60_000;  // 60s untuk render JS
+
 /**
  * Fetch a URL through ScraperAPI (static HTML, no JS rendering).
  * Automatically rotates keys on 401/403/429.
@@ -125,6 +130,7 @@ async function _fetchViaProxy(
   }
 
   const triedKeys = new Set<string>();
+  const timeoutMs = render ? PROXY_RENDER_TIMEOUT_MS : PROXY_STATIC_TIMEOUT_MS;
 
   while (true) {
     const key = getNextKey();
@@ -147,7 +153,9 @@ async function _fetchViaProxy(
     }
 
     try {
-      const res = await fetch(proxyUrl);
+      const res = await fetch(proxyUrl, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
 
       // Key-level errors → rotate
       if (res.status === 401 || res.status === 403 || res.status === 429) {
@@ -161,10 +169,11 @@ async function _fetchViaProxy(
 
       return res.text();
     } catch (err) {
-      // Network error on this key → try next
+      // Network / timeout error on this key → try next key
       if (err instanceof Error && err.message.includes("ScraperAPI: upstream")) {
         throw err;
       }
+      console.warn(`[ScraperAPI] fetch error for key ...${key.slice(-6)}, rotating:`, (err as Error)?.message ?? err);
       markKeyExhausted(key);
       continue;
     }

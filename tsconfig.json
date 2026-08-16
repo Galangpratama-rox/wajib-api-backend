@@ -50,7 +50,9 @@
       "@parsers/*": ["./src/parsers/*"],
       "@routes/*": ["./src/routes/*"],
       "@schemas/*": ["./src/schemas/*"],
-      "@scrapers/*": ["./src/scrapers/*"]
+      "@scrapers/*": ["./src/scrapers/*"],
+      "@services/*": ["./src/services/*"],
+      "@utils/*": ["./src/utils/*"]
     }
   },
   "include": ["src/**/*"],

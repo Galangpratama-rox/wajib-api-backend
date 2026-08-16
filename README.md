@@ -2,6 +2,58 @@
 
 REST API streaming dan download Anime subtitle Indonesia dari berbagai sumber
 
+## Arsitektur Caching
+
+Aplikasi menggunakan **two-layer caching** untuk meminimalisir hit ke sumber eksternal dan mencegah crash akibat ETIMEDOUT/ECONNRESET di Railway:
+
+```
+Request
+  │
+  ▼
+[L1] LRU Cache (in-memory, per-instance)   ← serverCache middleware, TTL 10-30 menit
+  │ miss
+  ▼
+[L2] Redis Cache (persistent, cross-restart) ← dataService, TTL configurable via env
+  │ miss
+  ▼
+[Singleflight] In-flight deduplication     ← cegah N request paralel untuk key yang sama
+  │
+  ▼
+[Concurrency Limiter] p-limit              ← batasi request paralel per tipe source
+  │
+  ▼
+Provider (HTML Scraper atau REST API)
+  │ error + ada stale copy di Redis
+  ▼
+[Stale Fallback] Return data lama          ← untuk endpoint metadata saja
+```
+
+### Dua Tipe Provider
+
+**HTML Scraper** (`services/htmlScraperProvider.ts`) — Otakudesu & Kuramanime
+- Fetch HTML → parse DOM dengan `node-html-parser` → return JSON
+- Concurrency limit: `SCRAPE_CONCURRENCY` (default 3)
+- Timeout: `SCRAPE_TIMEOUT_MS` (default 20s)
+- TTL Redis: `CACHE_TTL_SCRAPE` (default 600s / 10 menit)
+- Stale fallback: aktif untuk metadata, nonaktif untuk episode/server (URL streaming berumur pendek)
+
+**REST API** (`services/apiProvider.ts`) — Komiknesia
+- Fetch JSON langsung dari REST API target
+- Concurrency limit: `API_CONCURRENCY` (default 8)
+- Timeout: `API_TIMEOUT_MS` (default 10s)
+- TTL Redis: `CACHE_TTL_API` (default 300s / 5 menit)
+- Retry 1x pada 429 Too Many Requests
+
+### Stale Fallback
+
+Untuk endpoint metadata (home, list, detail anime/komik), kalau provider gagal total tapi ada data lama di Redis (sudah expired), endpoint akan mengembalikan data lama dengan header `X-Cache-Stale: true` daripada error 500. Ini **tidak** berlaku untuk episode dan chapter karena URL streaming/gambar berumur sangat pendek.
+
+### Setup Redis di Railway
+
+1. Tambahkan Redis plugin di Railway dashboard
+2. `REDIS_URL` akan otomatis tersedia sebagai environment variable
+3. Aplikasi tetap berjalan tanpa Redis (fallback ke LRU in-memory saja)
+
 # Sumber:
 
 API ini unofficial jadi ga ada kaitan dengan sumber yang tersedia...

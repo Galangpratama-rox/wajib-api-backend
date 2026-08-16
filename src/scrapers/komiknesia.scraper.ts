@@ -10,10 +10,16 @@ const BASE_HEADERS = {
   "Accept": "application/json",
 };
 
+// Timeout untuk semua request ke API Komiknesia
+const FETCH_TIMEOUT_MS = 15_000;
+
 const komiknesiaScraper = {
   async fetchJSON<T = unknown>(pathname: string): Promise<T> {
     const url = new URL(pathname, baseUrl);
-    const res = await fetch(url, { headers: BASE_HEADERS });
+    const res = await fetch(url, {
+      headers: BASE_HEADERS,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
 
     if (!res.ok) {
       throw new Error(`Komiknesia API error: ${res.status} ${res.statusText}`);

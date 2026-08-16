@@ -11,6 +11,14 @@ const CHROME_PATH = process.env.CHROME_PATH ||
     (process.platform === "win32"
         ? "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
         : "/usr/bin/chromium-browser");
+// Mirror USE_PROXY dari scraperApiProxy — scraper pakai ini untuk pilih path
+// Puppeteer vs ScraperAPI secara eksplisit tanpa import silang.
+const USE_PROXY = process.env.USE_PROXY?.toLowerCase() === "true";
+// ─── In-flight deduplication map ───────────────────────────────────────────
+// Kalau ada 5 request untuk episode yang sama masuk bersamaan,
+// hanya 1 yang benar-benar scrape — sisanya nunggu promise yang sama.
+// Map dihapus begitu promise selesai (resolve/reject).
+const inFlightEpisode = new Map();
 // ─── Persistent browser instance (reuse across requests) ───────────────────
 let browserInstance = null;
 let browserLaunchPromise = null;
@@ -79,8 +87,74 @@ const kuramanimeScraper = {
         return text;
     },
     async scrapeEpisodeWithBrowser(animeId, animeSlug, episodeId) {
-        // ScraperAPI render=true returns 500 for kuramanime — go straight to Puppeteer
-        return kuramanimeScraper._scrapeEpisodeWithPuppeteer(animeId, animeSlug, episodeId);
+        const episodeUrl = `${baseUrl}anime/${animeId}/${animeSlug}/episode/${episodeId}`;
+        const dedupeKey = `${animeId}/${animeSlug}/${episodeId}`;
+        // ── In-flight deduplication ──────────────────────────────────────────
+        // Kalau request untuk episode yang sama sedang berjalan,
+        // return promise yang sama — tidak spawn scraping baru.
+        const existing = inFlightEpisode.get(dedupeKey);
+        if (existing) {
+            console.info(`[scrapeEpisode] dedup hit for ${dedupeKey} — waiting for in-flight request`);
+            return existing;
+        }
+        const promise = kuramanimeScraper._doScrapeEpisode(episodeUrl, animeId, animeSlug).finally(() => {
+            inFlightEpisode.delete(dedupeKey);
+        });
+        inFlightEpisode.set(dedupeKey, promise);
+        return promise;
+    },
+    async _doScrapeEpisode(episodeUrl, animeId, animeSlug) {
+        // Ekstrak episodeId dari URL untuk fallback ke Puppeteer
+        const episodeId = episodeUrl.split("/episode/")[1] ?? "";
+        const emptyResult = {
+            server: { qualityList: [] },
+            download: { qualityList: [] },
+            prevEpisodeHref: null,
+            nextEpisodeHref: null,
+        };
+        // USE_PROXY=false → langsung Puppeteer, skip ScraperAPI sama sekali
+        if (!USE_PROXY) {
+            console.info(`[scrapeEpisode] proxy disabled — using Puppeteer directly for ${episodeUrl}`);
+            try {
+                return await kuramanimeScraper._scrapeEpisodeWithPuppeteer(animeId, animeSlug, episodeId);
+            }
+            catch (err) {
+                // Puppeteer tidak tersedia (Railway tanpa Chromium, dll) — return empty, jangan 500
+                console.warn(`[scrapeEpisode] Puppeteer failed, returning empty result:`, err);
+                return emptyResult;
+            }
+        }
+        // USE_PROXY=true → coba ScraperAPI rendered dulu, fallback ke Puppeteer
+        if (hasProxyKeys()) {
+            const t0 = Date.now();
+            console.info(`[scrapeEpisode] ScraperAPI rendered start — ${episodeUrl}`);
+            // Batas waktu ScraperAPI render: 45 detik
+            const SCRAPER_TIMEOUT_MS = 45_000;
+            try {
+                const html = await Promise.race([
+                    // wait_for_selector: ScraperAPI tunggu sampai #player source muncul di DOM
+                    fetchViaProxyRendered(episodeUrl, "#player source"),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("ScraperAPI render timeout")), SCRAPER_TIMEOUT_MS)),
+                ]);
+                console.info(`[scrapeEpisode] ScraperAPI rendered done in ${Date.now() - t0}ms`);
+                const result = kuramanimeScraper._parseEpisodeFromHTML(html, animeId, animeSlug);
+                if (result.server.qualityList.length === 0) {
+                    console.warn(`[scrapeEpisode] ScraperAPI rendered returned empty qualityList in ${Date.now() - t0}ms`);
+                }
+                return result;
+            }
+            catch (err) {
+                console.warn(`[scrapeEpisode] ScraperAPI render failed after ${Date.now() - t0}ms, falling back to Puppeteer:`, err);
+            }
+        }
+        // Fallback: Puppeteer
+        try {
+            return await kuramanimeScraper._scrapeEpisodeWithPuppeteer(animeId, animeSlug, episodeId);
+        }
+        catch (err) {
+            console.warn(`[scrapeEpisode] Puppeteer fallback also failed, returning empty result:`, err);
+            return emptyResult;
+        }
     },
     _parseEpisodeFromHTML(html, animeId, animeSlug) {
         const doc = parse(html, { parseNoneClosedTags: true });
@@ -151,10 +225,12 @@ const kuramanimeScraper = {
             catch (_) {
                 // timeout OK, JS still executes
             }
-            // Wait for #player source to appear
-            // 15s timeout — enough for Railway Chromium to load the player
+            // Wait for #player source to appear — much faster than fixed 12s timeout
+            // Falls back to 15s max if player never loads
             try {
-                await page.waitForFunction("document.querySelectorAll('#player source').length > 0", { timeout: 15000, polling: 300 });
+                await page.waitForFunction(
+                // Pass as string to avoid TypeScript DOM type errors
+                "document.querySelectorAll('#player source').length > 0", { timeout: 15000, polling: 300 });
             }
             catch (_) {
                 // Player did not load in time — return what we have
@@ -206,7 +282,14 @@ const kuramanimeScraper = {
         }
         finally {
             // Close page only, keep browser alive for next request
-            await page.close();
+            // Wrap dengan try/catch — kalau browser sudah disconnect saat close,
+            // jangan throw dan buang result yang sudah berhasil didapat
+            try {
+                await page.close();
+            }
+            catch (_) {
+                // browser sudah disconnect, tidak perlu close manual
+            }
         }
     },
 };

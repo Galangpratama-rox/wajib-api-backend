@@ -4,9 +4,24 @@ import kuramanimeConfig from "@configs/kuramanime.config.js";
 import kuramanimeScraper from "@scrapers/kuramanime.scraper.js";
 import kuramanimeParser from "@parsers/kuramanime.parser.js";
 import kuramanimeSchema from "@schemas/kuramanime.schema.js";
+import { scrapeAndParse } from "@services/htmlScraperProvider.js";
+import { fetchWithCache, type DataServiceOptions } from "@services/dataService.js";
 import * as v from "valibot";
 
 const { baseUrl } = kuramanimeConfig;
+
+// Opsi default untuk semua endpoint Kuramanime (HTML scraping)
+const SCRAPE_OPTS: DataServiceOptions = {
+  type: "scrape",
+  allowStale: true,
+};
+
+// Episode berisi URL streaming yang berumur pendek — allowStale=false
+const EPISODE_OPTS: DataServiceOptions = {
+  type: "scrape",
+  allowStale: false,
+  ttl: 300, // 5 menit
+};
 
 const kuramanimeController = {
   async getRoot(req: Request, res: Response, next: NextFunction) {
@@ -24,30 +39,10 @@ const kuramanimeController = {
         description: "Daftar anime",
         pathParams: [],
         queryParams: [
-          {
-            key: "search",
-            value: "string",
-            defaultValue: null,
-            required: false,
-          },
-          {
-            key: "status",
-            value: '"ongoing" | "completed" | "upcoming" | "movie"',
-            defaultValue: null,
-            required: false,
-          },
-          {
-            key: "sort",
-            value: '"a-z" | "z-a" | "oldest" | "latest" | "popular" | "most_viewed" | "updated"',
-            defaultValue: '"latest" | "updated"',
-            required: false,
-          },
-          {
-            key: "page",
-            value: "string",
-            defaultValue: "1",
-            required: false,
-          },
+          { key: "search", value: "string", defaultValue: null, required: false },
+          { key: "status", value: '"ongoing" | "completed" | "upcoming" | "movie"', defaultValue: null, required: false },
+          { key: "sort", value: '"a-z" | "z-a" | "oldest" | "latest" | "popular" | "most_viewed" | "updated"', defaultValue: '"latest" | "updated"', required: false },
+          { key: "page", value: "string", defaultValue: "1", required: false },
         ],
       },
       {
@@ -56,33 +51,15 @@ const kuramanimeController = {
         description: "Jadwal rilis",
         pathParams: [],
         queryParams: [
-          {
-            key: "day",
-            value:
-              '"all" | "random" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday"',
-            defaultValue: "all",
-            required: false,
-          },
-          {
-            key: "page",
-            value: "string",
-            defaultValue: "1",
-            required: false,
-          },
+          { key: "day", value: '"all" | "random" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday"', defaultValue: "all", required: false },
+          { key: "page", value: "string", defaultValue: "1", required: false },
         ],
       },
       {
         method: "GET",
         path: "/kuramanime/properties/{propertyType}",
         description: "Daftar properti berdasarkan tipe properti",
-        pathParams: [
-          {
-            key: "propertyType",
-            value: '"genre" | "season" | "studio" | "type" | "quality" | "source" | "country"',
-            defaultValue: null,
-            required: true,
-          },
-        ],
+        pathParams: [{ key: "propertyType", value: '"genre" | "season" | "studio" | "type" | "quality" | "source" | "country"', defaultValue: null, required: true }],
         queryParams: [],
       },
       {
@@ -90,18 +67,8 @@ const kuramanimeController = {
         path: "/kuramanime/properties/{propertyType}/{propertyId}",
         description: "Daftar anime berdasarkan id properti",
         pathParams: [
-          {
-            key: "propertyType",
-            value: '"genre" | "season" | "studio" | "type" | "quality" | "source" | "country"',
-            defaultValue: null,
-            required: true,
-          },
-          {
-            key: "propertyId",
-            value: "string",
-            defaultValue: null,
-            required: true,
-          },
+          { key: "propertyType", value: '"genre" | "season" | "studio" | "type" | "quality" | "source" | "country"', defaultValue: null, required: true },
+          { key: "propertyId", value: "string", defaultValue: null, required: true },
         ],
         queryParams: [],
       },
@@ -110,18 +77,8 @@ const kuramanimeController = {
         path: "/kuramanime/anime/{animeId}/{animeSlug}",
         description: "Detail anime berdasarkan id anime",
         pathParams: [
-          {
-            key: "animeId",
-            value: "string",
-            defaultValue: null,
-            required: true,
-          },
-          {
-            key: "animeSlug",
-            value: "string",
-            defaultValue: null,
-            required: true,
-          },
+          { key: "animeId", value: "string", defaultValue: null, required: true },
+          { key: "animeSlug", value: "string", defaultValue: null, required: true },
         ],
         queryParams: [],
       },
@@ -130,24 +87,9 @@ const kuramanimeController = {
         path: "/kuramanime/batch/{animeId}/{animeSlug}/{batchId}",
         description: "Batch anime berdasarkan id batch",
         pathParams: [
-          {
-            key: "animeId",
-            value: "string",
-            defaultValue: null,
-            required: true,
-          },
-          {
-            key: "animeSlug",
-            value: "string",
-            defaultValue: null,
-            required: true,
-          },
-          {
-            key: "batchId",
-            value: "string",
-            defaultValue: null,
-            required: true,
-          },
+          { key: "animeId", value: "string", defaultValue: null, required: true },
+          { key: "animeSlug", value: "string", defaultValue: null, required: true },
+          { key: "batchId", value: "string", defaultValue: null, required: true },
         ],
         queryParams: [],
       },
@@ -156,46 +98,30 @@ const kuramanimeController = {
         path: "/kuramanime/episode/{animeId}/{animeSlug}/{episodeId}",
         description: "Detail episode berdasarkan id episode",
         pathParams: [
-          {
-            key: "animeId",
-            value: "string",
-            defaultValue: null,
-            required: true,
-          },
-          {
-            key: "animeSlug",
-            value: "string",
-            defaultValue: null,
-            required: true,
-          },
-          {
-            key: "episodeId",
-            value: "string",
-            defaultValue: null,
-            required: true,
-          },
+          { key: "animeId", value: "string", defaultValue: null, required: true },
+          { key: "animeSlug", value: "string", defaultValue: null, required: true },
+          { key: "episodeId", value: "string", defaultValue: null, required: true },
         ],
         queryParams: [],
       },
     ];
 
-    res.json(
-      setPayload(res, {
-        message: "Status: OK 🚀",
-        data: { routes },
-      })
-    );
+    res.json(setPayload(res, { message: "Status: OK 🚀", data: { routes } }));
   },
 
   async getHome(req: Request, res: Response, next: NextFunction) {
     try {
-      const document = await kuramanimeScraper.scrapeDOM("/", "https://google.com");
-      const home = kuramanimeParser.parseHome(document);
-      const payload = setPayload(res, {
-        data: home,
-      });
+      const cacheKey = "kuramanime:home";
+      const { data, stale } = await fetchWithCache(
+        cacheKey,
+        () => scrapeAndParse(baseUrl, "/", (doc) => kuramanimeParser.parseHome(doc), {
+          ref: "https://google.com",
+        }),
+        SCRAPE_OPTS
+      );
 
-      res.json(payload);
+      if (stale) res.setHeader("X-Cache-Stale", "true");
+      res.json(setPayload(res, { data }));
     } catch (error) {
       next(error);
     }
@@ -208,38 +134,38 @@ const kuramanimeController = {
       const search = query?.search || "";
       const page = Number(query?.page) || 1;
       const sort =
-        (query?.sort === "a-z"
-          ? "ascending"
-          : query?.sort === "z-a"
-          ? "descending"
-          : query?.sort) || (status === "ongoing" ? "updated" : "latest");
+        (query?.sort === "a-z" ? "ascending" : query?.sort === "z-a" ? "descending" : query?.sort) ||
+        (status === "ongoing" ? "updated" : "latest");
 
       function getPathname() {
         if (status) {
-          return `/quick/${
-            status === "completed" ? "finished" : status
-          }?order_by=${sort}&page=${page}`;
+          return `/quick/${status === "completed" ? "finished" : status}?order_by=${sort}&page=${page}`;
         }
-
         if (search) {
           return `/anime?order_by=${sort}&page=${page}&search=${search}`;
         }
-
         return `/anime?order_by=${sort}&page=${page}`;
       }
 
       const pathname = getPathname();
-      const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
-      const pagination = kuramanimeParser.parsePagination(document);
-      const payload = setPayload(res, {
-        data: {
-          animeList: status !== "ongoing" ? kuramanimeParser.parseAnimes(document) : undefined,
-          episodeList: status === "ongoing" ? kuramanimeParser.parseEpisodes(document) : undefined,
-        },
-        pagination,
-      });
+      const cacheKey = `kuramanime:animes:${pathname}`;
 
-      res.json(payload);
+      const { data, stale } = await fetchWithCache(
+        cacheKey,
+        () =>
+          scrapeAndParse(baseUrl, pathname, (doc) => ({
+            animeList: status !== "ongoing" ? kuramanimeParser.parseAnimes(doc) : undefined,
+            episodeList: status === "ongoing" ? kuramanimeParser.parseEpisodes(doc) : undefined,
+            pagination: kuramanimeParser.parsePagination(doc),
+          }), { ref: baseUrl }),
+        SCRAPE_OPTS
+      );
+
+      if (stale) res.setHeader("X-Cache-Stale", "true");
+      res.json(setPayload(res, {
+        data: { animeList: data.animeList, episodeList: data.episodeList },
+        pagination: data.pagination,
+      }));
     } catch (error) {
       next(error);
     }
@@ -249,16 +175,19 @@ const kuramanimeController = {
     try {
       const { propertyType } = v.parse(kuramanimeSchema.param.properties, req.params);
       const pathname = `/properties/${propertyType}`;
-      const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
-      const propertyList = kuramanimeParser.parseProperties(document);
-      const payload = setPayload(res, {
-        data: {
-          propertyType,
-          propertyList,
-        },
-      });
+      const cacheKey = `kuramanime:properties:${propertyType}`;
 
-      res.json(payload);
+      const { data, stale } = await fetchWithCache(
+        cacheKey,
+        () =>
+          scrapeAndParse(baseUrl, pathname, (doc) => kuramanimeParser.parseProperties(doc), {
+            ref: baseUrl,
+          }),
+        { ...SCRAPE_OPTS, ttl: 3600 }
+      );
+
+      if (stale) res.setHeader("X-Cache-Stale", "true");
+      res.json(setPayload(res, { data: { propertyType, propertyList: data } }));
     } catch (error) {
       next(error);
     }
@@ -266,28 +195,27 @@ const kuramanimeController = {
 
   async getAnimesByProperty(req: Request, res: Response, next: NextFunction) {
     try {
-      const { propertyType, propertyId } = v.parse(
-        kuramanimeSchema.param.animesByPropertyId,
-        req.params
-      );
+      const { propertyType, propertyId } = v.parse(kuramanimeSchema.param.animesByPropertyId, req.params);
       const query = v.parse(kuramanimeSchema.query.animesByPropertyId, req.query);
       const page = Number(query?.page) || 1;
       const sort =
-        (query?.sort === "a-z"
-          ? "ascending"
-          : query?.sort === "z-a"
-          ? "descending"
-          : query?.sort) || "latest";
+        (query?.sort === "a-z" ? "ascending" : query?.sort === "z-a" ? "descending" : query?.sort) ||
+        "latest";
       const pathname = `/properties/${propertyType}/${propertyId}?order_by=${sort}&page=${page}`;
-      const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
-      const animeList = kuramanimeParser.parseAnimes(document);
-      const pagination = kuramanimeParser.parsePagination(document);
-      const payload = setPayload(res, {
-        data: { animeList },
-        pagination,
-      });
+      const cacheKey = `kuramanime:property:${propertyType}:${propertyId}:${sort}:${page}`;
 
-      res.json(payload);
+      const { data, stale } = await fetchWithCache(
+        cacheKey,
+        () =>
+          scrapeAndParse(baseUrl, pathname, (doc) => ({
+            animeList: kuramanimeParser.parseAnimes(doc),
+            pagination: kuramanimeParser.parsePagination(doc),
+          }), { ref: baseUrl }),
+        SCRAPE_OPTS
+      );
+
+      if (stale) res.setHeader("X-Cache-Stale", "true");
+      res.json(setPayload(res, { data: { animeList: data.animeList }, pagination: data.pagination }));
     } catch (error) {
       next(error);
     }
@@ -299,45 +227,46 @@ const kuramanimeController = {
       const page = Number(query?.page) || 1;
       const day = query?.day || "all";
 
-      // Kuramanime tidak support ?scheduled_day=all secara native —
-      // fetch tiap hari secara sequential dengan delay kecil
-      // untuk menghindari rate limit dan memory spike di Railway
-      if (day === "all") {
-        const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
-        const animeList: ReturnType<typeof kuramanimeParser.parseScheduledAnimes> = [];
+      // "all" fetch 7 hari — sangat lambat tanpa cache, 1 jam TTL sangat membantu
+      const cacheKey = `kuramanime:schedule:${day}:${page}`;
 
-        for (const d of days) {
-          try {
-            const pathname = `/schedule?scheduled_day=${d}&page=${page}`;
-            const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
-            const dayList = kuramanimeParser.parseScheduledAnimes(document, false);
-            animeList.push(...dayList);
-          } catch (_) {
-            // skip hari yang gagal, lanjut ke berikutnya
+      const { data, stale } = await fetchWithCache(
+        cacheKey,
+        async () => {
+          if (day === "all") {
+            const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+            const animeList: ReturnType<typeof kuramanimeParser.parseScheduledAnimes> = [];
+
+            for (const d of days) {
+              try {
+                const pathname = `/schedule?scheduled_day=${d}&page=${page}`;
+                const dayList = await scrapeAndParse(
+                  baseUrl,
+                  pathname,
+                  (doc) => kuramanimeParser.parseScheduledAnimes(doc, false),
+                  { ref: baseUrl }
+                );
+                animeList.push(...dayList);
+              } catch (_) {
+                // skip hari yang gagal
+              }
+              await new Promise((r) => setTimeout(r, 300));
+            }
+
+            return { animeList, pagination: undefined };
           }
-          // delay kecil antar request agar tidak trigger rate limit
-          await new Promise((r) => setTimeout(r, 300));
-        }
 
-        return res.json(
-          setPayload(res, {
-            data: { animeList },
-            pagination: undefined,
-          })
-        );
-      }
+          const pathname = `/schedule?scheduled_day=${day}&page=${page}`;
+          return scrapeAndParse(baseUrl, pathname, (doc) => ({
+            animeList: kuramanimeParser.parseScheduledAnimes(doc),
+            pagination: kuramanimeParser.parsePagination(doc),
+          }), { ref: baseUrl });
+        },
+        { ...SCRAPE_OPTS, ttl: 3600 }
+      );
 
-      // Fetch hari tertentu
-      const pathname = `/schedule?scheduled_day=${day}&page=${page}`;
-      const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
-      const animeList = kuramanimeParser.parseScheduledAnimes(document);
-      const pagination = kuramanimeParser.parsePagination(document);
-      const payload = setPayload(res, {
-        data: { animeList },
-        pagination,
-      });
-
-      res.json(payload);
+      if (stale) res.setHeader("X-Cache-Stale", "true");
+      res.json(setPayload(res, { data: { animeList: data.animeList }, pagination: data.pagination }));
     } catch (error) {
       next(error);
     }
@@ -347,43 +276,42 @@ const kuramanimeController = {
     try {
       const params = v.parse(kuramanimeSchema.param.animeDetails, req.params);
       const pathname = `/anime/${params.animeId}/${params.animeSlug}`;
-      const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
-      
-      let details;
-      try {
-        details = kuramanimeParser.parseAnimeDetails(document, params);
-      } catch (parseErr: any) {
-        console.error(`[getAnimeDetails] parse error for ${pathname}:`, parseErr?.status, parseErr?.message, parseErr?.stack?.slice(0, 200));
-        throw parseErr;
-      }
+      const cacheKey = `kuramanime:anime:${params.animeId}:${params.animeSlug}`;
 
-      // Generate episode list lengkap dari 1..last.
-      // "Terlama" di HTML bukan episode pertama anime — itu episode terlama
-      // di halaman pertama pagination episode list (e.g. One Piece: ep 989).
-      // Karena episodeId = nomor episode dan semua anime di Kuramanime mulai dari ep 1,
-      // kita selalu generate dari 1 sampai last.
-      const last = details.episode.last;
+      const { data: details, stale } = await fetchWithCache(
+        cacheKey,
+        async () => {
+          const doc = await scrapeAndParse(baseUrl, pathname, (d) => d, { ref: baseUrl });
+          let parsed;
+          try {
+            parsed = kuramanimeParser.parseAnimeDetails(doc, params);
+          } catch (parseErr: any) {
+            console.error(`[getAnimeDetails] parse error for ${pathname}:`, parseErr?.status, parseErr?.message);
+            throw parseErr;
+          }
 
-      if (last !== null && last >= 1) {
-        details.episode.first = 1;
-        details.episodeList = Array.from({ length: last }, (_, i) => {
-          const epNum = i + 1;
-          return {
-            title: `Ep ${epNum}`,
-            episodeId: String(epNum),
-            animeId: params.animeId,
-            animeSlug: params.animeSlug,
-            // kuramanimeUrl dikosongkan — client generate sendiri jika diperlukan
-            kuramanimeUrl: undefined,
-          };
-        });
-      }
+          const last = parsed.episode.last;
+          if (last !== null && last >= 1) {
+            parsed.episode.first = 1;
+            parsed.episodeList = Array.from({ length: last }, (_, i) => {
+              const epNum = i + 1;
+              return {
+                title: `Ep ${epNum}`,
+                episodeId: String(epNum),
+                animeId: params.animeId,
+                animeSlug: params.animeSlug,
+                kuramanimeUrl: undefined,
+              };
+            });
+          }
 
-      const payload = setPayload(res, {
-        data: { details },
-      });
+          return parsed;
+        },
+        { ...SCRAPE_OPTS, ttl: 1800 }
+      );
 
-      res.json(payload);
+      if (stale) res.setHeader("X-Cache-Stale", "true");
+      res.json(setPayload(res, { data: { details } }));
     } catch (error) {
       next(error);
     }
@@ -393,15 +321,21 @@ const kuramanimeController = {
     try {
       const params = v.parse(kuramanimeSchema.param.batchDetails, req.params);
       const mainPathname = `/anime/${params.animeId}/${params.animeSlug}/batch/${params.batchId}`;
-      const secret = await kuramanimeScraper.scrapeSecret(`${baseUrl}${mainPathname}`);
-      const pathname = `${mainPathname}?Ub3BzhijicHXZdv=${secret}&C2XAPerzX1BM7V9=kuramadrive&page=1`;
-      const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
-      const details = kuramanimeParser.parseBatchDetails(document, params);
-      const payload = setPayload(res, {
-        data: { details },
-      });
+      const cacheKey = `kuramanime:batch:${params.animeId}:${params.animeSlug}:${params.batchId}`;
 
-      res.json(payload);
+      const { data, stale } = await fetchWithCache(
+        cacheKey,
+        async () => {
+          const secret = await kuramanimeScraper.scrapeSecret(`${baseUrl}${mainPathname}`);
+          const pathname = `${mainPathname}?Ub3BzhijicHXZdv=${secret}&C2XAPerzX1BM7V9=kuramadrive&page=1`;
+          const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
+          return kuramanimeParser.parseBatchDetails(document, params);
+        },
+        { ...SCRAPE_OPTS, ttl: 1800 }
+      );
+
+      if (stale) res.setHeader("X-Cache-Stale", "true");
+      res.json(setPayload(res, { data: { details: data } }));
     } catch (error) {
       next(error);
     }
@@ -411,35 +345,35 @@ const kuramanimeController = {
     try {
       const params = v.parse(kuramanimeSchema.param.episodeDetails, req.params);
       const mainPathname = `/anime/${params.animeId}/${params.animeSlug}/episode/${params.episodeId}`;
+      const cacheKey = `kuramanime:episode:${params.animeId}:${params.animeSlug}:${params.episodeId}`;
 
-      const t0 = Date.now();
+      const { data } = await fetchWithCache(
+        cacheKey,
+        async () => {
+          const t0 = Date.now();
 
-      // Jalankan semua fetch secara paralel:
-      // 1. scrapeSecret — ambil token
-      // 2. scrapeEpisodeWithBrowser — ScraperAPI render / Puppeteer (paling lambat, mulai duluan)
-      const [secret, browserResult] = await Promise.all([
-        kuramanimeScraper.scrapeSecret(`${baseUrl}${mainPathname}`),
-        kuramanimeScraper.scrapeEpisodeWithBrowser(
-          params.animeId,
-          params.animeSlug,
-          params.episodeId
-        ),
-      ]);
+          const [secret, browserResult] = await Promise.all([
+            kuramanimeScraper.scrapeSecret(`${baseUrl}${mainPathname}`),
+            kuramanimeScraper.scrapeEpisodeWithBrowser(
+              params.animeId,
+              params.animeSlug,
+              params.episodeId
+            ),
+          ]);
 
-      console.info(`[getEpisodeDetails] parallel fetch done in ${Date.now() - t0}ms`);
+          console.info(`[getEpisodeDetails] parallel fetch done in ${Date.now() - t0}ms`);
 
-      // Setelah secret tersedia, fetch HTML statis untuk metadata (title, lastUpdated)
-      const pathname = `${mainPathname}?Ub3BzhijicHXZdv=${secret}&C2XAPerzX1BM7V9=kuramadrive&page=1`;
-      const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
+          const pathname = `${mainPathname}?Ub3BzhijicHXZdv=${secret}&C2XAPerzX1BM7V9=kuramadrive&page=1`;
+          const document = await kuramanimeScraper.scrapeDOM(pathname, baseUrl);
 
-      console.info(`[getEpisodeDetails] dom fetch done in ${Date.now() - t0}ms total`);
+          console.info(`[getEpisodeDetails] dom fetch done in ${Date.now() - t0}ms total`);
 
-      const details = kuramanimeParser.parseEpisodeDetails(document, params, browserResult);
-      const payload = setPayload(res, {
-        data: { details },
-      });
+          return kuramanimeParser.parseEpisodeDetails(document, params, browserResult);
+        },
+        EPISODE_OPTS
+      );
 
-      res.json(payload);
+      res.json(setPayload(res, { data: { details: data } }));
     } catch (error) {
       next(error);
     }

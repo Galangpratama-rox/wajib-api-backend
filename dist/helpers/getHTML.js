@@ -2,6 +2,9 @@ import errorinCuy from "./errorinCuy.js";
 import sanitizeHtml from "sanitize-html";
 import { fetchViaProxy, hasProxyKeys } from "./scraperApiProxy.js";
 export const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0";
+// Timeout untuk semua outbound fetch — mencegah request hang selamanya
+// dan menyebabkan ETIMEDOUT / proses Railway crash.
+const FETCH_TIMEOUT_MS = 15_000;
 export default async function getHTML(baseUrl, pathname, ref, sanitize = false) {
     const url = new URL(pathname, baseUrl);
     const headers = {
@@ -11,7 +14,11 @@ export default async function getHTML(baseUrl, pathname, ref, sanitize = false) 
         headers["Referer"] = ref.startsWith("http") ? ref : new URL(ref, baseUrl).toString();
     }
     let html = null;
-    const response = await fetch(url, { headers, redirect: "manual" });
+    const response = await fetch(url, {
+        headers,
+        redirect: "manual",
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
     // redirect (3xx) atau 403 → coba proxy
     const shouldTryProxy = (response.status === 403 || (response.status >= 301 && response.status <= 308)) &&
         hasProxyKeys();

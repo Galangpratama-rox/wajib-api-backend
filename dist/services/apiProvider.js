@@ -1,0 +1,49 @@
+/**
+ * apiProvider — abstraksi untuk semua direct REST API call.
+ *
+ * Modul ini tidak melakukan caching sendiri — caching dihandle oleh dataService.
+ * Tugasnya hanya: fetch JSON dari REST API, handle HTTP errors, retry 1x pada 429.
+ *
+ * Timeout diatur via env API_TIMEOUT_MS (default 10s) dan dikirim sebagai
+ * AbortSignal.timeout() di setiap fetch call.
+ */
+const API_TIMEOUT_MS = Number(process.env.API_TIMEOUT_MS) || 10_000;
+// Delay sebelum retry setelah 429 Too Many Requests
+const RETRY_429_DELAY_MS = 1_000;
+/**
+ * Fetch JSON dari URL dengan timeout, error handling, dan opsional retry 429.
+ * Throw Error dengan pesan deskriptif kalau gagal — ditangkap oleh dataService.
+ */
+export async function fetchJson(url, options) {
+    return _doFetch(url, options, false);
+}
+async function _doFetch(url, options, isRetry) {
+    let res;
+    try {
+        res = await fetch(url, {
+            ...(options?.headers ? { headers: options.headers } : {}),
+            signal: AbortSignal.timeout(API_TIMEOUT_MS),
+        });
+    }
+    catch (err) {
+        throw new Error(`[apiProvider] Network error fetching ${url}: ${err.message}`);
+    }
+    // 429 Too Many Requests — retry sekali setelah delay
+    if (res.status === 429 && !isRetry && (options?.retry429 ?? true)) {
+        console.warn(`[apiProvider] 429 on ${url}, retrying after ${RETRY_429_DELAY_MS}ms`);
+        await delay(RETRY_429_DELAY_MS);
+        return _doFetch(url, options, true);
+    }
+    if (!res.ok) {
+        throw new Error(`[apiProvider] HTTP ${res.status} ${res.statusText} from ${url}`);
+    }
+    try {
+        return (await res.json());
+    }
+    catch (err) {
+        throw new Error(`[apiProvider] Failed to parse JSON from ${url}: ${err.message}`);
+    }
+}
+function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}

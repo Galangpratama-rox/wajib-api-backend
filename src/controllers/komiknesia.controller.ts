@@ -1,14 +1,39 @@
 import type { Request, Response, NextFunction } from "express";
 import setPayload from "@helpers/setPayload.js";
-import komiknesiaScraper from "@scrapers/komiknesia.scraper.js";
 import komiknesiaParser from "@parsers/komiknesia.parser.js";
 import komiknesiaSchema from "@schemas/komiknesia.schema.js";
+import komiknesiaConfig, { komiknesiaOrigin } from "@configs/komiknesia.config.js";
+import { fetchJson } from "@services/apiProvider.js";
+import { fetchWithCache, type DataServiceOptions } from "@services/dataService.js";
 import type {
   IKomiknesiaListResponse,
   IKomiknesiaComicDetailRaw,
   IKomiknesiaChapterReadRaw,
 } from "@interfaces/komiknesia.interface.js";
 import * as v from "valibot";
+
+const { baseUrl } = komiknesiaConfig;
+
+// Headers dikirim ke semua request Komiknesia API
+const API_HEADERS: Record<string, string> = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0",
+  Origin: komiknesiaOrigin,
+  Referer: `${komiknesiaOrigin}/`,
+  Accept: "application/json",
+};
+
+// Opsi default untuk semua endpoint Komiknesia (direct REST API)
+const API_OPTS: DataServiceOptions = {
+  type: "api",
+  allowStale: true,
+};
+
+/** Helper: fetch JSON dari Komiknesia API menggunakan apiProvider */
+function apiGet<T>(pathname: string): Promise<T> {
+  const url = new URL(pathname, baseUrl);
+  return fetchJson<T>(url, { headers: API_HEADERS, retry429: true });
+}
 
 const komiknesiaController = {
   async getRoot(_req: Request, res: Response, _next: NextFunction) {
@@ -77,46 +102,33 @@ const komiknesiaController = {
 
   async getHome(_req: Request, res: Response, next: NextFunction) {
     try {
-      // Fetch popular today, latest update, dan top per type secara paralel
-      const [popularDay, latestUpdate, topManga, topManhwa, topManhua] = await Promise.all([
-        komiknesiaScraper.fetchJSON<IKomiknesiaListResponse>(
-          "contents?page=1&per_page=10&orderBy=Popular&popularWindow=day"
-        ),
-        komiknesiaScraper.fetchJSON<IKomiknesiaListResponse>(
-          "contents?page=1&per_page=15&orderBy=Update&project=true"
-        ),
-        komiknesiaScraper.fetchJSON<IKomiknesiaListResponse>(
-          "contents?page=1&per_page=10&type=manga&orderBy=Popular"
-        ),
-        komiknesiaScraper.fetchJSON<IKomiknesiaListResponse>(
-          "contents?page=1&per_page=10&type=manhwa&orderBy=Popular"
-        ),
-        komiknesiaScraper.fetchJSON<IKomiknesiaListResponse>(
-          "contents?page=1&per_page=10&type=manhua&orderBy=Popular"
-        ),
-      ]);
+      const cacheKey = "komiknesia:home";
 
-      res.json(
-        setPayload(res, {
-          data: {
-            popularToday: (popularDay.data || []).map((item) =>
-              komiknesiaParser.parseKomikCard(item)
-            ),
-            latestUpdate: (latestUpdate.data || []).map((item) =>
-              komiknesiaParser.parseKomikCard(item)
-            ),
-            topManga: (topManga.data || []).map((item) =>
-              komiknesiaParser.parseKomikCard(item)
-            ),
-            topManhwa: (topManhwa.data || []).map((item) =>
-              komiknesiaParser.parseKomikCard(item)
-            ),
-            topManhua: (topManhua.data || []).map((item) =>
-              komiknesiaParser.parseKomikCard(item)
-            ),
-          },
-        })
+      const { data, stale } = await fetchWithCache(
+        cacheKey,
+        async () => {
+          // 5 request paralel ke API
+          const [popularDay, latestUpdate, topManga, topManhwa, topManhua] = await Promise.all([
+            apiGet<IKomiknesiaListResponse>("contents?page=1&per_page=10&orderBy=Popular&popularWindow=day"),
+            apiGet<IKomiknesiaListResponse>("contents?page=1&per_page=15&orderBy=Update&project=true"),
+            apiGet<IKomiknesiaListResponse>("contents?page=1&per_page=10&type=manga&orderBy=Popular"),
+            apiGet<IKomiknesiaListResponse>("contents?page=1&per_page=10&type=manhwa&orderBy=Popular"),
+            apiGet<IKomiknesiaListResponse>("contents?page=1&per_page=10&type=manhua&orderBy=Popular"),
+          ]);
+
+          return {
+            popularToday: (popularDay.data || []).map((item) => komiknesiaParser.parseKomikCard(item)),
+            latestUpdate: (latestUpdate.data || []).map((item) => komiknesiaParser.parseKomikCard(item)),
+            topManga: (topManga.data || []).map((item) => komiknesiaParser.parseKomikCard(item)),
+            topManhwa: (topManhwa.data || []).map((item) => komiknesiaParser.parseKomikCard(item)),
+            topManhua: (topManhua.data || []).map((item) => komiknesiaParser.parseKomikCard(item)),
+          };
+        },
+        API_OPTS
       );
+
+      if (stale) res.setHeader("X-Cache-Stale", "true");
+      res.json(setPayload(res, { data }));
     } catch (error) {
       next(error);
     }
@@ -132,7 +144,6 @@ const komiknesiaController = {
       params.set("page", String(page));
       params.set("per_page", String(perPage));
 
-      // Map order values to API format
       const orderMap: Record<string, string> = {
         latest: "Update",
         popular: "Popular",
@@ -141,18 +152,21 @@ const komiknesiaController = {
       };
       params.set("orderBy", orderMap[query?.order ?? "latest"] ?? "Update");
 
-      // 'q' adalah param search yang valid di API Komiknesia
       if (query?.search) params.set("q", query.search);
       if (query?.genre) params.set("genre", query.genre);
       if (query?.type) params.set("type", query.type);
-      // Note: filter status tidak didukung oleh API Komiknesia
 
-      const raw = await komiknesiaScraper.fetchJSON<IKomiknesiaListResponse>(
-        `contents?${params.toString()}`
+      const cacheKey = `komiknesia:komiks:${params.toString()}`;
+
+      const { data: raw, stale } = await fetchWithCache(
+        cacheKey,
+        () => apiGet<IKomiknesiaListResponse>(`contents?${params.toString()}`),
+        API_OPTS
       );
 
       const { komikList, pagination } = komiknesiaParser.parseKomikList(raw);
 
+      if (stale) res.setHeader("X-Cache-Stale", "true");
       res.json(setPayload(res, { data: { komikList }, pagination }));
     } catch (error) {
       next(error);
@@ -171,12 +185,17 @@ const komiknesiaController = {
       params.set("genre", genreId);
       params.set("orderBy", "Update");
 
-      const raw = await komiknesiaScraper.fetchJSON<IKomiknesiaListResponse>(
-        `contents?${params.toString()}`
+      const cacheKey = `komiknesia:genre:${genreId}:${page}`;
+
+      const { data: raw, stale } = await fetchWithCache(
+        cacheKey,
+        () => apiGet<IKomiknesiaListResponse>(`contents?${params.toString()}`),
+        API_OPTS
       );
 
       const { komikList, pagination } = komiknesiaParser.parseKomikList(raw);
 
+      if (stale) res.setHeader("X-Cache-Stale", "true");
       res.json(setPayload(res, { data: { komikList }, pagination }));
     } catch (error) {
       next(error);
@@ -186,14 +205,17 @@ const komiknesiaController = {
   async getKomikDetails(req: Request, res: Response, next: NextFunction) {
     try {
       const { komikSlug } = v.parse(komiknesiaSchema.param.komikDetails, req.params);
+      const cacheKey = `komiknesia:komik:${komikSlug}`;
 
-      // Endpoint khusus detail komik: /api/comic/:slug
-      const raw = await komiknesiaScraper.fetchJSON<{ status: boolean; data: IKomiknesiaComicDetailRaw }>(
-        `comic/${komikSlug}`
+      const { data: raw, stale } = await fetchWithCache(
+        cacheKey,
+        () => apiGet<{ status: boolean; data: IKomiknesiaComicDetailRaw }>(`comic/${komikSlug}`),
+        API_OPTS
       );
 
       const details = komiknesiaParser.parseKomikDetails(raw.data);
 
+      if (stale) res.setHeader("X-Cache-Stale", "true");
       res.json(setPayload(res, { data: { details } }));
     } catch (error) {
       next(error);
@@ -203,13 +225,15 @@ const komiknesiaController = {
   async getChapterDetails(req: Request, res: Response, next: NextFunction) {
     try {
       const { chapterSlug } = v.parse(komiknesiaSchema.param.chapterDetails, req.params);
+      // Chapter images berumur pendek — allowStale=false supaya tidak return URL gambar expired
+      const cacheKey = `komiknesia:chapter:${chapterSlug}`;
 
-      // Endpoint baca chapter: /api/chapters/slug/:chapterSlug
-      const raw = await komiknesiaScraper.fetchJSON<{ status: boolean; data: IKomiknesiaChapterReadRaw }>(
-        `chapters/slug/${chapterSlug}`
+      const { data: raw } = await fetchWithCache(
+        cacheKey,
+        () => apiGet<{ status: boolean; data: IKomiknesiaChapterReadRaw }>(`chapters/slug/${chapterSlug}`),
+        { type: "api", allowStale: false }
       );
 
-      // Ambil komikSlug dari data chapter
       const komikSlug = raw.data?.content?.slug ?? "";
       const details = komiknesiaParser.parseChapterDetails(raw.data, komikSlug);
 
@@ -221,10 +245,13 @@ const komiknesiaController = {
 
   async getGenres(_req: Request, res: Response, next: NextFunction) {
     try {
-      const raw = await komiknesiaScraper.fetchJSON<{
-        status: boolean;
-        data: { id: number; name: string; slug: string }[];
-      }>("contents/genres");
+      const cacheKey = "komiknesia:genres";
+
+      const { data: raw, stale } = await fetchWithCache(
+        cacheKey,
+        () => apiGet<{ status: boolean; data: { id: number; name: string; slug: string }[] }>("contents/genres"),
+        { ...API_OPTS, ttl: 3600 } // genre list jarang berubah, TTL 1 jam
+      );
 
       const genreList = (raw.data || []).map((g) => ({
         id: g.id,
@@ -232,6 +259,7 @@ const komiknesiaController = {
         slug: g.slug,
       }));
 
+      if (stale) res.setHeader("X-Cache-Stale", "true");
       res.json(setPayload(res, { data: { genreList } }));
     } catch (error) {
       next(error);

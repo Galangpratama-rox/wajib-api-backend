@@ -385,7 +385,39 @@ const otakudesuParser = {
         const serverBody = new URLSearchParams(serverIdObj);
         const server = await otakudesuScraper.scrapeServer(serverBody.toString(), referer);
         const url = generateSrcFromIframeTag(Buffer.from(server.data || "", "base64").toString());
-        return { url };
+        // Resolve actual video URL by fetching the desustream page with otakudesu origin
+        let videoUrl = null;
+        let type = "unknown";
+        try {
+            const streamRes = await fetch(url, {
+                headers: {
+                    Origin: baseUrl,
+                    Referer: baseUrl,
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+                },
+            });
+            const html = await streamRes.text();
+            // odstream / arcg: extract from `var vs = { ..., file:"<url>" }`
+            const vsFileMatch = html.match(/var\s+vs\s*=\s*\{[^}]*?file\s*:\s*["']([^"']+)["']/s);
+            if (vsFileMatch?.[1]) {
+                videoUrl = vsFileMatch[1];
+                type = "odstream";
+            }
+            // ondesuhd: extract from <video src="..."> or <source src="...">
+            if (!videoUrl) {
+                const videoTagMatch = html.match(/<video[^>]+src=["']([^"']+)["']/i);
+                const sourceTagMatch = html.match(/<source[^>]+src=["']([^"']+)["']/i);
+                const matched = videoTagMatch?.[1] || sourceTagMatch?.[1] || null;
+                if (matched) {
+                    videoUrl = matched;
+                    type = "ondesuhd";
+                }
+            }
+        }
+        catch {
+            // videoUrl stays null — caller can fall back to iframe url
+        }
+        return { url, videoUrl, type };
     },
     parsePagination(document) {
         function generatePage(el) {
