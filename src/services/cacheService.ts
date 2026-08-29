@@ -16,6 +16,21 @@
 
 import redisClient, { isReady } from "@utils/redisClient.js";
 
+// ─── Flush semua cache saat startup jika env FLUSH_CACHE_ON_START=true ───────
+if (process.env.FLUSH_CACHE_ON_START === "true") {
+  // Tunggu koneksi siap lalu flush — non-blocking, tidak halt startup
+  const tryFlush = (attempt = 0) => {
+    if (isReady() && redisClient) {
+      redisClient.flushdb()
+        .then(() => console.info("[cacheService] FLUSH_CACHE_ON_START: Redis flushed (0 keys)"))
+        .catch((e: Error) => console.warn("[cacheService] Flush failed:", e.message));
+    } else if (attempt < 10) {
+      setTimeout(() => tryFlush(attempt + 1), 500);
+    }
+  };
+  setTimeout(() => tryFlush(), 1000);
+}
+
 // ─── TTL config ───────────────────────────────────────────────────────────────
 export const TTL_SCRAPE = Number(process.env.CACHE_TTL_SCRAPE) || 600;   // 10 menit
 export const TTL_API    = Number(process.env.CACHE_TTL_API)    || 300;    // 5 menit
