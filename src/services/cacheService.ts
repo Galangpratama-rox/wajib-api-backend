@@ -27,13 +27,22 @@ const STALE_SUFFIX = ":stale";
 
 /**
  * Ambil nilai dari Redis. Return null kalau tidak ada atau Redis down.
+ * Juga skip (return null) kalau data tersimpan masih dalam format encrypted
+ * lama { encrypted: true, data, time } — supaya otomatis di-refresh.
  */
 export async function getCached<T = unknown>(key: string): Promise<T | null> {
   if (!isReady()) return null;
   try {
     const raw = await redisClient!.get(key);
     if (!raw) return null;
-    return JSON.parse(raw) as T;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // Tolak cache lama yang berisi encrypted response mentah
+    if (parsed && typeof parsed === "object" && parsed.encrypted === true && parsed.data && parsed.time) {
+      console.warn(`[cacheService] Stale encrypted cache detected for "${key}", invalidating`);
+      await redisClient!.del(key, key + ":stale").catch(() => {});
+      return null;
+    }
+    return parsed as T;
   } catch (err) {
     console.error("[cacheService] getCached error:", (err as Error).message);
     return null;
@@ -65,14 +74,20 @@ export async function setCached(
 
 /**
  * Ambil stale copy (salinan terakhir yang tersimpan tanpa TTL).
- * Return null kalau tidak ada.
+ * Return null kalau tidak ada atau masih format encrypted lama.
  */
 export async function getStaleCached<T = unknown>(key: string): Promise<T | null> {
   if (!isReady()) return null;
   try {
     const raw = await redisClient!.get(key + STALE_SUFFIX);
     if (!raw) return null;
-    return JSON.parse(raw) as T;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // Tolak stale cache yang masih encrypted mentah
+    if (parsed && typeof parsed === "object" && parsed.encrypted === true && parsed.data && parsed.time) {
+      await redisClient!.del(key + STALE_SUFFIX).catch(() => {});
+      return null;
+    }
+    return parsed as T;
   } catch (err) {
     console.error("[cacheService] getStaleCached error:", (err as Error).message);
     return null;
