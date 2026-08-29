@@ -8,13 +8,13 @@ import kuramanimeRouter from "@routes/kuramanime.routes.js";
 import komiknesiaRouter from "@routes/komiknesia.routes.js";
 import setPayload from "@helpers/setPayload.js";
 import { getCacheStats } from "@services/cacheService.js";
+import redisClient, { isReady } from "@utils/redisClient.js";
 import cors from "cors";
 
 // ─── Side-effect: inisialisasi Redis client ──────────────────────────────────
 // Import cukup untuk memicu koneksi saat startup. Modul lain yang butuh Redis
 // mengimport dari @utils/redisClient secara langsung.
 import "@utils/redisClient.js";
-
 const { PORT } = appConfig;
 const app = express();
 
@@ -77,6 +77,39 @@ app.get("/cache/stats", async (req, res, next) => {
   try {
     const stats = await getCacheStats();
     res.json(setPayload(res, { data: stats ?? { keyCount: 0, redisStatus: "unavailable" } }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /cache/flush?prefix=xxx  — hapus semua key (atau per prefix)
+// Contoh: DELETE /cache/flush             → flush semua key
+//         DELETE /cache/flush?prefix=komiknesia  → hapus key yg diawali "komiknesia"
+app.delete("/cache/flush", async (req, res, next) => {
+  try {
+    if (!isReady() || !redisClient) {
+      res.status(503).json(setPayload(res, { data: { deleted: 0, message: "Redis not available" } }));
+      return;
+    }
+    const prefix = typeof req.query.prefix === "string" ? req.query.prefix.trim() : "";
+    let deleted = 0;
+    if (prefix) {
+      // Hapus hanya key yang match prefix (scan untuk keamanan, hindari KEYS di prod)
+      let cursor = "0";
+      do {
+        const [nextCursor, keys] = await redisClient.scan(cursor, "MATCH", `${prefix}*`, "COUNT", 100);
+        cursor = nextCursor;
+        if (keys.length > 0) {
+          await redisClient.del(...keys);
+          deleted += keys.length;
+        }
+      } while (cursor !== "0");
+    } else {
+      // Flush semua
+      await redisClient.flushdb();
+      deleted = -1; // -1 = semua
+    }
+    res.json(setPayload(res, { data: { deleted, prefix: prefix || "*", message: "Cache flushed" } }));
   } catch (err) {
     next(err);
   }
