@@ -21,6 +21,7 @@ const API_HEADERS: Record<string, string> = {
   Origin: komiknesiaOrigin,
   Referer: `${komiknesiaOrigin}/`,
   Accept: "application/json",
+  "X-Device-Id": `dv_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-6)}`,
 };
 
 // Opsi default untuk semua endpoint Komiknesia (direct REST API)
